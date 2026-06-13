@@ -7,6 +7,8 @@ import { AppLayout } from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Bookings from "@/pages/Bookings";
+import Branches from "@/pages/Branches";
+import Users from "@/pages/Users";
 
 function App() {
   return (
@@ -24,6 +26,8 @@ function App() {
             >
               <Route path="/" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/branches" element={<Branches />} />
+              <Route path="/users" element={<Users />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -32,9 +36,9 @@ function App() {
           position="top-right"
           toastOptions={{
             style: {
-              background: "#FFFFFF",
-              color: "#1C1C1C",
-              border: "1px solid #EAE5D9",
+              background: "#2E1C46",
+              color: "#F0E6FF",
+              border: "1px solid #5A3D85",
             },
           }}
         />

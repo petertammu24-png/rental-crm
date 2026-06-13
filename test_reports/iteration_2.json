@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 2 testing covered branches CRUD, users CRUD with manager/staff scoping, role-based access control on bookings, and per-branch bill numbering. Backend: 21/21 pytest cases pass in /app/backend/tests/test_iteration2_rbac.py (branches create/update/delete + dup-code guard + delete-with-users/bookings guard, user mgmt with manager-scoped listing and forced-own-branch on staff creation, manager cannot escalate role or touch users outside branch, staff cannot PUT/DELETE bookings but CAN POST with auto branch_id, per-branch counters: BNG sequential & KLN independent, super_admin branch_id filter on bookings + dashboard). Frontend: super_admin sees Dashboard/Bookings/Branches/Users nav + dashboard-branch-filter + bookings-branch-filter + form-branch-select in BookingFormDialog; manager nav correctly omits Branches and hides both branch filters; staff nav shows only Dashboard+Bookings, bookings list has NO edit/delete buttons but new-booking-button works (branch auto-assigned). Neumorphic dark-purple theme renders cleanly across all roles.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/users (manager)", "issue": "When a manager passes a different branch_id (not their own), the server silently overrides it to the manager's own branch and returns 200 with the corrected branch instead of returning 400 'cannot assign to other branch'. Could be confusing/hide bugs in UI; consider explicit 400 if branch_id mismatches manager's own."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "App.js routes / Branches.jsx / Users.jsx", "issue": "Routes /branches and /users are NOT role-gated. Manager navigating directly to /branches sees the full Branches page including 'New Branch' button (data-testid=new-branch-button). Staff navigating directly to /branches or /users sees new-branch-button / new-user-button. Sidebar correctly hides the nav items, and the backend rejects any writes with 403, but the page should redirect non-authorized roles (e.g., <Navigate to='/'>) to prevent a misleading UI state where users see buttons that always fail.", "selector": "[data-testid='new-branch-button'], [data-testid='new-user-button']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (super_admin)", "issues": ["Hydration warning in console: '<span> cannot be a child of <option>'. Comes from emergent dev-tool wrappers injected around <option> elements in the dashboard-branch-filter native <select>. Visible as repeated console.error but does not break functionality. Likely a tooling artifact rather than app code, but worth confirming the build strips x-* wrappers."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2_rbac.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [
+    "Add role-based route guards: in App.js wrap /branches with a guard that redirects non-super_admin to '/', and wrap /users with a guard that redirects staff to '/'. Alternatively, return an 'Access denied' UI inside Branches.jsx/Users.jsx when user.role is not allowed. This will prevent the misleading state where managers/staff see 'New Branch' / 'New User' buttons that always 403.",
+    "(optional) Make POST /api/users return 400 when a manager explicitly supplies a branch_id different from their own, instead of silently overriding."
+  ],
+  "critical_code_review_comments": [
+    "App.js: /branches and /users routes use only ProtectedRoute (auth check) — no role check; backend enforces but UI should mirror to avoid 'looks-like-it-works' confusion.",
+    "Branches.jsx and Users.jsx do not check user.role on render; relying purely on sidebar visibility is fragile.",
+    "server.py POST /api/users (manager branch): silently coerces branch_id to manager's own. Either document or reject mismatched value.",
+    "server.py still uses deprecated @app.on_event lifecycle hooks (carried from iter 1); migrate to lifespan context manager.",
+    "CORS still defaults to '*' with allow_credentials=True (carried from iter 1); tighten origins for production."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2_rbac.py (new — 21 tests for branches/users/RBAC/per-branch bill numbers)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "92%"},
+  "test_credentials": "Super admin: admin@jewel.com / admin123 (seeded). Manager/Staff users are created on-the-fly via API in each test run with TEST_ prefix and cleaned up.",
+  "seed_data_creation": "test_iteration2_rbac.py creates branches/users/bookings prefixed with TEST_ and cleans up in test_zz_cleanup. Frontend Playwright tests create TEST_uimgr*/TEST_uistf* users and delete them at end of script. No production data modified.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression for iteration 2 lives at /app/backend/tests/test_iteration2_rbac.py and depends on the two seeded branches (BNG_ID=535210a2-b7c5-4e2b-a926-f1e1af7664bc and KLN_ID=6a2d4fb3-b5d3-4b05-9292-b51f6893ec90). Per-branch counter expects BNG-#### / KLN-####. The pre-existing BILL-0001 (legacy, no branch_id) is intentionally not deleted. The iteration_1 test file at /app/backend/tests/test_crm_backend.py will FAIL now if rerun because (a) it asserts auto-generated bill_no starts with 'BILL-' (now BNG-/KLN-) and (b) super_admin POST /api/bookings now requires branch_id — that file should be retired or updated. Frontend route-gating bug: /branches and /users are reachable by any authenticated role; backend rejects writes with 403 but UI shows the action buttons.",
+  "rca of the issue": "Route-gating bug RCA: In /app/frontend/src/App.js, /branches and /users are nested only inside <ProtectedRoute>, which only checks 'is user logged in?'. There is no per-route role check. Branches.jsx and Users.jsx components render unconditionally regardless of user.role. The sidebar in AppLayout.jsx uses a navItemsFor(role) helper that hides nav links for non-super/non-manager roles, which masks the issue from normal users but does not gate the route itself. Fix: introduce a <RoleRoute roles={['super_admin']}> wrapper (or check role inside each page and Navigate to '/'). Mitigation already in place: backend require_role(...) on POST/PUT/DELETE returns 403, so no data leak — but the buttons shouldn't render at all."
+}

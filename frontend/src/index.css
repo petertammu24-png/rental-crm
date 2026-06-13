@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -9,38 +9,38 @@ body {
     font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #FDFBF7;
-    color: #1C1C1C;
+    background: #251638;
+    color: #F0E6FF;
 }
 
 .font-display {
-    font-family: 'Fraunces', ui-serif, Georgia, serif;
-    font-optical-sizing: auto;
-    letter-spacing: -0.01em;
+    font-family: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+    font-weight: 600;
 }
 
 @layer base {
     :root {
-        --background: 40 43% 98%;
-        --foreground: 0 0% 11%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 11%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 11%;
-        --primary: 154 70% 13%;
+        --background: 270 39% 15%;
+        --foreground: 270 80% 95%;
+        --card: 270 35% 19%;
+        --card-foreground: 270 80% 95%;
+        --popover: 270 38% 14%;
+        --popover-foreground: 270 80% 95%;
+        --primary: 292 72% 49%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 44 38% 95%;
-        --secondary-foreground: 0 0% 11%;
-        --muted: 44 28% 94%;
-        --muted-foreground: 0 0% 45%;
-        --accent: 44 70% 95%;
-        --accent-foreground: 154 70% 13%;
-        --destructive: 0 75% 42%;
+        --secondary: 270 32% 24%;
+        --secondary-foreground: 270 60% 92%;
+        --muted: 270 28% 22%;
+        --muted-foreground: 270 25% 70%;
+        --accent: 292 72% 49%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 350 75% 56%;
         --destructive-foreground: 0 0% 100%;
-        --border: 38 27% 88%;
-        --input: 38 27% 88%;
-        --ring: 154 70% 13%;
-        --radius: 0.625rem;
+        --border: 270 28% 28%;
+        --input: 270 30% 18%;
+        --ring: 292 72% 49%;
+        --radius: 1rem;
     }
 }
 
@@ -53,25 +53,127 @@ body {
     }
 }
 
+/* Page background w/ subtle radial */
+.app-bg {
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(168, 60, 211, 0.18), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, rgba(110, 38, 211, 0.18), transparent 60%),
+      #251638;
+    min-height: 100vh;
+}
+
+/* Neumorphic surfaces */
+.neu {
+    background: #2E1C46;
+    border-radius: 22px;
+    box-shadow:
+      10px 10px 24px rgba(0, 0, 0, 0.55),
+      -8px -8px 22px rgba(120, 70, 180, 0.16);
+}
+
+.neu-sm {
+    background: #2E1C46;
+    border-radius: 16px;
+    box-shadow:
+      6px 6px 14px rgba(0, 0, 0, 0.5),
+      -5px -5px 14px rgba(120, 70, 180, 0.16);
+}
+
+.neu-inset {
+    background: #261538;
+    border-radius: 14px;
+    box-shadow:
+      inset 5px 5px 12px rgba(0, 0, 0, 0.55),
+      inset -4px -4px 10px rgba(120, 70, 180, 0.16);
+}
+
+.neu-btn {
+    background: #2E1C46;
+    border-radius: 14px;
+    box-shadow:
+      5px 5px 12px rgba(0, 0, 0, 0.5),
+      -4px -4px 10px rgba(120, 70, 180, 0.2);
+    transition: all 0.18s ease;
+    color: #E9DEFE;
+}
+.neu-btn:hover {
+    box-shadow:
+      3px 3px 8px rgba(0, 0, 0, 0.5),
+      -3px -3px 8px rgba(120, 70, 180, 0.22);
+    color: #F8EAFE;
+}
+.neu-btn:active {
+    box-shadow:
+      inset 4px 4px 10px rgba(0, 0, 0, 0.55),
+      inset -3px -3px 8px rgba(120, 70, 180, 0.16);
+}
+
+.neu-btn-primary {
+    background: linear-gradient(135deg, #B026D3 0%, #DA4FF1 60%, #E879F9 100%);
+    color: #ffffff;
+    border-radius: 14px;
+    box-shadow:
+      6px 6px 16px rgba(176, 38, 211, 0.45),
+      -3px -3px 10px rgba(232, 121, 249, 0.25);
+    transition: all 0.18s ease;
+}
+.neu-btn-primary:hover {
+    box-shadow:
+      4px 4px 12px rgba(176, 38, 211, 0.55),
+      -2px -2px 8px rgba(232, 121, 249, 0.3);
+    transform: translateY(-1px);
+}
+.neu-btn-primary:active {
+    transform: translateY(0);
+    box-shadow:
+      inset 3px 3px 8px rgba(0, 0, 0, 0.3),
+      inset -2px -2px 6px rgba(232, 121, 249, 0.2);
+}
+
+.neu-input {
+    background: #261538 !important;
+    border: none !important;
+    border-radius: 12px !important;
+    color: #F0E6FF !important;
+    box-shadow:
+      inset 4px 4px 10px rgba(0, 0, 0, 0.55),
+      inset -3px -3px 8px rgba(120, 70, 180, 0.18);
+    transition: box-shadow 0.18s ease;
+}
+.neu-input::placeholder {
+    color: #8E7AB2;
+}
+.neu-input:focus,
+.neu-input:focus-visible {
+    outline: none !important;
+    box-shadow:
+      inset 4px 4px 10px rgba(0, 0, 0, 0.55),
+      inset -3px -3px 8px rgba(120, 70, 180, 0.18),
+      0 0 0 2px rgba(218, 79, 241, 0.45);
+}
+
+.label-eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #B097D1;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
     height: 8px;
     width: 8px;
 }
+::-webkit-scrollbar-track {
+    background: transparent;
+}
 ::-webkit-scrollbar-thumb {
-    background: #E6DFCE;
+    background: #3D2A5C;
     border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: #C7BFA7;
-}
-
-.label-eyebrow {
-    font-size: 0.7rem;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    font-weight: 500;
-    color: #737373;
+    background: #5A3D85;
 }
 
 @layer base {

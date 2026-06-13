@@ -27,14 +27,27 @@ export const todayISO = () => new Date().toISOString().slice(0, 10);
 export const statusTone = (status) => {
   switch (status) {
     case "Booked":
-      return "bg-[#FDF6E3] text-[#7A5C00] border border-[#F0E5BF]";
+      return "bg-[#3A2A5E] text-[#E9CFFD] border border-[#5A3D85]";
     case "Delivered":
-      return "bg-[#E8EDF2] text-[#142945] border border-[#CFD7E2]";
+      return "bg-[#2E3D5C] text-[#BFD1F5] border border-[#3F5582]";
     case "Returned":
-      return "bg-[#E8F3EE] text-[#1C4A32] border border-[#BFDDCA]";
+      return "bg-[#22463A] text-[#A6E8C9] border border-[#3A6E58]";
     case "Overdue":
-      return "bg-[#F9EAEB] text-[#7A1A1E] border border-[#E7C2C4]";
+      return "bg-[#5C1F2C] text-[#FDB3C0] border border-[#7E2C3E]";
     default:
-      return "bg-[#F4EFE3] text-[#4A4A4A] border border-[#E6DFCE]";
+      return "bg-[#3A2A5E] text-[#E9CFFD] border border-[#5A3D85]";
+  }
+};
+
+export const roleLabel = (role) => {
+  switch (role) {
+    case "super_admin":
+      return "Super Admin";
+    case "manager":
+      return "Manager";
+    case "staff":
+      return "Staff";
+    default:
+      return role || "—";
   }
 };
