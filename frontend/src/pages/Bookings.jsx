@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Search, Pencil, Trash2, RefreshCcw } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, RefreshCcw, Download, FileText } from "lucide-react";
 import { apiClient, formatApiErrorDetail } from "@/lib/api";
 import { formatINR, formatDate, statusTone } from "@/lib/format";
+import { downloadCSV } from "@/lib/csv";
 import { useAuth } from "@/context/AuthContext";
 import { BookingFormDialog } from "@/components/BookingFormDialog";
 import {
@@ -89,6 +91,36 @@ export default function Bookings() {
     }
   };
 
+  const handleExportCSV = () => {
+    if (bookings.length === 0) {
+      toast.info("Nothing to export");
+      return;
+    }
+    const rows = bookings.map((b) => ({
+      "Bill No": b.bill_no,
+      Branch: branchMap[b.branch_id]?.code || "",
+      "Product Code": b.product_code,
+      "Product Name": b.product_name || "",
+      "Customer Name": b.customer?.name || "",
+      "Customer Phone": b.customer?.phone || "",
+      "Customer Address": b.customer?.address || "",
+      "ID Proof": b.customer?.id_proof || "",
+      "Booking Date": b.booking_date,
+      "Delivery Date": b.delivery_date,
+      "Return Date": b.return_date,
+      "Rental Amount": b.rental_amount,
+      "Total Advance": b.total_advance,
+      "Advance Paid": b.advance_paid,
+      "Customer To Be Paid": b.customer_to_be_paid,
+      "Refund To Customer": b.return_to_be_paid_to_customer,
+      Status: b.status,
+      Notes: b.notes || "",
+    }));
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCSV(`bookings-${stamp}.csv`, rows);
+    toast.success(`Exported ${rows.length} bookings`);
+  };
+
   return (
     <div className="p-6 md:p-8 lg:p-10 max-w-[1600px] mx-auto" data-testid="bookings-page">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-8">
@@ -101,16 +133,25 @@ export default function Bookings() {
             Every jewellery set that's out, due, or returning home.
           </p>
         </div>
-        <button
-          className="neu-btn-primary px-5 py-3 text-sm font-semibold inline-flex items-center gap-2"
-          onClick={() => {
-            setEditing(null);
-            setDialogOpen(true);
-          }}
-          data-testid="new-booking-button"
-        >
-          <Plus className="w-4 h-4" /> New booking
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="neu-btn px-4 py-3 text-sm font-medium inline-flex items-center gap-2"
+            onClick={handleExportCSV}
+            data-testid="export-csv-button"
+          >
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
+          <button
+            className="neu-btn-primary px-5 py-3 text-sm font-semibold inline-flex items-center gap-2"
+            onClick={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+            data-testid="new-booking-button"
+          >
+            <Plus className="w-4 h-4" /> New booking
+          </button>
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -255,6 +296,14 @@ export default function Bookings() {
                       </Td>
                       <Td right>
                         <div className="flex justify-end gap-1">
+                          <Link
+                            to={`/invoice/${b.id}`}
+                            className="neu-btn w-8 h-8 flex items-center justify-center rounded-lg"
+                            data-testid={`invoice-booking-${b.bill_no}`}
+                            title="Print invoice"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </Link>
                           {canEdit && (
                             <button
                               className="neu-btn w-8 h-8 flex items-center justify-center rounded-lg"

@@ -9,6 +9,7 @@ import {
   Sparkles,
   Menu,
   X,
+  Users as UsersIcon,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { roleLabel } from "@/lib/format";
@@ -18,6 +19,7 @@ const navItemsFor = (role) => {
   const items = [
     { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
     { to: "/bookings", label: "Bookings", icon: Gem, end: false },
+    { to: "/customers", label: "Customers", icon: UsersIcon, end: false },
   ];
   if (role === "super_admin") {
     items.push({ to: "/branches", label: "Branches", icon: Building2, end: false });

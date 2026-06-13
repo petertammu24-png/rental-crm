@@ -10,6 +10,8 @@ import Dashboard from "@/pages/Dashboard";
 import Bookings from "@/pages/Bookings";
 import Branches from "@/pages/Branches";
 import Users from "@/pages/Users";
+import Customers from "@/pages/Customers";
+import Invoice from "@/pages/Invoice";
 
 function App() {
   return (
@@ -19,6 +21,14 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route
+              path="/invoice/:id"
+              element={
+                <ProtectedRoute>
+                  <Invoice />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               element={
                 <ProtectedRoute>
                   <AppLayout />
@@ -27,6 +37,7 @@ function App() {
             >
               <Route path="/" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/customers" element={<Customers />} />
               <Route
                 path="/branches"
                 element={

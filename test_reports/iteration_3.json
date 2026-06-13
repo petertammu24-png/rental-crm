@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 3 testing complete: validated /api/customers aggregation+RBAC scoping, Customers page UI, Bookings CSV export, and printable Invoice page. Backend: 13/13 pytest cases pass in /app/backend/tests/test_iteration3_customers.py (auth-required, aggregation across multi-branch same-phone, total_bookings/total_rental/total_advance_paid sums, outstanding_to_collect/refund excludes Returned, last_booking_date is max, branch_ids contains every branch, bookings list shape matches contract, search case-insensitive on name+phone, super_admin sees all + branch_id filter limits to only that branch's bookings even for a multi-branch customer, manager scoped to own branch — KLN customers invisible, regression sanity on /branches /bookings /users /auth/me /stats/dashboard all green). Frontend: all critical flows pass for super_admin and manager — nav-customers visible to ALL roles, /customers loads with customers-page + customers-search-input, customers-branch-filter shows for super_admin and hides for manager, view-customer-<phone> opens customer-detail-dialog with bookings list linking to /invoice/<id>. Bookings page: export-csv-button triggers a real download (bookings-YYYY-MM-DD.csv with all 18 expected headers including Bill No, Branch, Product Code, Product Name, Customer Name, Customer Phone, Customer Address, ID Proof, Booking/Delivery/Return Date, Rental Amount, Total Advance, Advance Paid, Customer To Be Paid, Refund To Customer, Status, Notes). invoice-booking-<bill_no> per row navigates to /invoice/:id which renders invoice-page with invoice-branch-name, invoice-bill-no, invoice-print, invoice-back, the 'Rental balance (Rental − Advance Paid)' row, and Authorised Signature footer. invoice-back returns to /bookings. Unauthenticated /invoice/:id correctly redirects to /login.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard / Customers (super_admin select dropdowns)", "issues": ["Carry-over from iter 2: React hydration warning '<span> cannot be a child of <option>' is printed in console. Originates from emergent dev-tool x-* wrappers injected around dynamic <option> children, not from app code. Non-blocking, but worth muting in dev wrapper or replacing native <select> with a shadcn Select to silence."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3_customers.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py list_customers(): aggregation is O(N) over up to 10000 bookings in Python — fine for current scale; consider a $group MongoDB pipeline if booking volume grows past 10k.",
+    "Customers.jsx: customer detail dialog uses Link inside table-like list which still triggers full SPA navigation — works, but for super_admin viewing from /customers, hitting Back from /invoice returns to /customers (correct). No issue.",
+    "Invoice.jsx: when booking has no branch_id (legacy BILL-0001) the branch fields fall back to 'Branch' string and address/phone are blank — acceptable; just be aware printed invoice shows generic header for legacy rows.",
+    "Bookings.jsx handleExportCSV exports the current filtered list (search + status + branch filter all applied server-side via /bookings query). This matches spec.",
+    "lib/csv.js: properly BOM-prefixes UTF-8, escapes commas/quotes/newlines — good.",
+    "Carry-overs from iter 1/2 still open: deprecated @app.on_event lifecycle hooks, CORS '*' with allow_credentials=True, /branches /users now have RoleRoute guards (iter2 action item resolved)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3_customers.py (new — 13 tests for /api/customers aggregation, search, branch scoping + 5 regression hits)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Super admin admin@jewel.com/admin123 (seeded). Manager mgr.bng@banglzz.com/manager123 (pre-existing BNG branch manager).",
+  "seed_data_creation": "test_iteration3_customers.py seeds 4 TEST_-prefixed bookings (PHONE_MULTI in both BNG+KLN, PHONE_BNG_ONLY, PHONE_KLN_ONLY) and deletes them in the module-scope fixture teardown. Pre-existing BILL-0001 + iter2 BNG-0001/KLN-0001 are untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter3 backend suite: /app/backend/tests/test_iteration3_customers.py (13 tests, ~3s, all pass). It depends on the seeded super_admin admin@jewel.com, the pre-existing branches BNG + KLN, and the pre-existing manager mgr.bng@banglzz.com. All TEST_-prefixed bookings are cleaned up automatically. Iter2 RBAC suite at /app/backend/tests/test_iteration2_rbac.py still passes. Iter1 suite at /app/backend/tests/test_crm_backend.py is OBSOLETE (asserts auto bill_no starts with 'BILL-' and that super_admin can POST without branch_id — both no longer true). Frontend: nav-customers, customers-page, customers-search-input, customers-branch-filter, view-customer-<phone>, customer-detail-dialog, customer-booking-<bill_no>, export-csv-button, invoice-booking-<bill_no>, invoice-page, invoice-branch-name, invoice-bill-no, invoice-print, invoice-back data-testids all verified working. Note: invoice/:id is outside AppLayout so no sidebar appears on the invoice page — this is intentional per spec.",
+  "rca of the issue": "N/A — no functional issues found. Hydration warning on <select><option> is from emergent dev-tool wrapper, not app code."
+}

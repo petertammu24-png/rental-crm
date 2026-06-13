@@ -464,6 +464,86 @@ async def delete_booking(booking_id: str, current=Depends(get_current_user)):
     return {"ok": True}
 
 
+# ---------- Customers (aggregated from bookings) ----------
+@api_router.get("/customers")
+async def list_customers(
+    search: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    current=Depends(get_current_user),
+):
+    q = booking_scope(current)
+    if current["role"] == ROLE_SUPER and branch_id and branch_id != "all":
+        q["branch_id"] = branch_id
+    if search:
+        s = search.strip()
+        q["$or"] = [
+            {"customer.name": {"$regex": s, "$options": "i"}},
+            {"customer.phone": {"$regex": s, "$options": "i"}},
+        ]
+    items = await db.bookings.find(q, {"_id": 0}).to_list(10000)
+    by_phone: dict = {}
+    for b in items:
+        c = b.get("customer") or {}
+        phone = (c.get("phone") or "").strip()
+        if not phone:
+            continue
+        entry = by_phone.get(phone)
+        if not entry:
+            entry = {
+                "phone": phone,
+                "name": c.get("name", ""),
+                "address": c.get("address", ""),
+                "id_proof": c.get("id_proof", ""),
+                "total_bookings": 0,
+                "total_rental": 0.0,
+                "total_advance_paid": 0.0,
+                "outstanding_to_collect": 0.0,
+                "outstanding_to_refund": 0.0,
+                "last_booking_date": "",
+                "branch_ids": set(),
+                "bookings": [],
+            }
+            by_phone[phone] = entry
+        entry["total_bookings"] += 1
+        entry["total_rental"] += float(b.get("rental_amount") or 0)
+        entry["total_advance_paid"] += float(b.get("advance_paid") or 0)
+        if b.get("status") != "Returned":
+            entry["outstanding_to_collect"] += max(float(b.get("customer_to_be_paid") or 0), 0)
+            entry["outstanding_to_refund"] += max(float(b.get("return_to_be_paid_to_customer") or 0), 0)
+        entry["last_booking_date"] = max(entry["last_booking_date"], b.get("booking_date", ""))
+        if b.get("branch_id"):
+            entry["branch_ids"].add(b["branch_id"])
+        entry["bookings"].append({
+            "id": b["id"],
+            "bill_no": b.get("bill_no"),
+            "branch_id": b.get("branch_id"),
+            "product_code": b.get("product_code"),
+            "product_name": b.get("product_name"),
+            "booking_date": b.get("booking_date"),
+            "delivery_date": b.get("delivery_date"),
+            "return_date": b.get("return_date"),
+            "rental_amount": b.get("rental_amount"),
+            "status": b.get("status"),
+        })
+        if c.get("name") and not entry["name"]:
+            entry["name"] = c["name"]
+        if c.get("address") and not entry["address"]:
+            entry["address"] = c["address"]
+        if c.get("id_proof") and not entry["id_proof"]:
+            entry["id_proof"] = c["id_proof"]
+    out = []
+    for e in by_phone.values():
+        e["branch_ids"] = sorted(list(e["branch_ids"]))
+        e["bookings"].sort(key=lambda x: x.get("booking_date") or "", reverse=True)
+        e["total_rental"] = round(e["total_rental"], 2)
+        e["total_advance_paid"] = round(e["total_advance_paid"], 2)
+        e["outstanding_to_collect"] = round(e["outstanding_to_collect"], 2)
+        e["outstanding_to_refund"] = round(e["outstanding_to_refund"], 2)
+        out.append(e)
+    out.sort(key=lambda x: x.get("last_booking_date") or "", reverse=True)
+    return out
+
+
 # ---------- Stats ----------
 @api_router.get("/stats/dashboard")
 async def dashboard_stats(branch_id: Optional[str] = None, current=Depends(get_current_user)):
