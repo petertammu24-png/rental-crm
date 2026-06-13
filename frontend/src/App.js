@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
+import { RoleRoute } from "@/components/RoleRoute";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Bookings from "@/pages/Bookings";
@@ -26,8 +27,22 @@ function App() {
             >
               <Route path="/" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
-              <Route path="/branches" element={<Branches />} />
-              <Route path="/users" element={<Users />} />
+              <Route
+                path="/branches"
+                element={
+                  <RoleRoute roles={["super_admin"]}>
+                    <Branches />
+                  </RoleRoute>
+                }
+              />
+              <Route
+                path="/users"
+                element={
+                  <RoleRoute roles={["super_admin", "manager"]}>
+                    <Users />
+                  </RoleRoute>
+                }
+              />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
