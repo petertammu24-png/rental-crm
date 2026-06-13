@@ -1,0 +1,98 @@
+{
+  "theme": "light",
+  "archetype": "Archetype 1: Organic & Earthy",
+  "rationale": "A CRM for a rental jewellery business needs to feel premium, trustworthy, and distinctly tied to luxury, yet remain highly functional for daily management. Using a warm bone-white base with deep emerald green and soft gold accents creates a high-end 'Indian Bridal/Jewellery' aesthetic. We avoid standard 'SaaS Blue' to maintain the brand's premium identity.",
+  "typography": {
+    "fonts": {
+      "heading": "Cabinet Grotesk",
+      "body": "Outfit",
+      "mono": "JetBrains Mono"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-medium text-[#1C1C1C]",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-medium text-[#1C1C1C]",
+      "h3": "text-xl font-medium text-[#1C1C1C]",
+      "body": "text-base font-normal text-[#4A4A4A]",
+      "labels": "text-xs tracking-[0.2em] uppercase font-medium text-[#737373]"
+    }
+  },
+  "colors": {
+    "background": {
+      "default": "#FDFBF7",
+      "surface": "#FFFFFF",
+      "glass": "bg-white/70 backdrop-blur-xl"
+    },
+    "text": {
+      "primary": "#1C1C1C",
+      "secondary": "#4A4A4A",
+      "disabled": "#A3A3A3"
+    },
+    "brand": {
+      "primary": "#0A3626",
+      "primary_hover": "#134D38",
+      "primary_foreground": "#FFFFFF",
+      "accent_gold": "#D4AF37",
+      "accent_gold_light": "#F9F6E8"
+    },
+    "status": {
+      "success_bg": "#E8F3EE",
+      "success_text": "#1C4A32",
+      "warning_bg": "#FDF6E3",
+      "warning_text": "#7A5C00",
+      "danger_bg": "#F9EAEB",
+      "danger_text": "#7A1A1E",
+      "info_bg": "#E8EDF2",
+      "info_text": "#142945"
+    },
+    "border": "#EAE5D9"
+  },
+  "spacing_and_layout": {
+    "container_padding": "p-6 md:p-8 lg:p-12",
+    "card_padding": "p-6",
+    "dashboard_grid": "grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6",
+    "radius": {
+      "card": "rounded-xl",
+      "button": "rounded-md",
+      "input": "rounded-md"
+    }
+  },
+  "components": {
+    "cards": "Flat surface (#FFFFFF) with 1px border (#EAE5D9) and very soft shadow (shadow-sm). No heavy drop shadows. Hover states should slightly lift (-translate-y-0.5) and enhance shadow.",
+    "tables": "Minimalist premium tables. Use only horizontal bottom borders for rows (border-b border-[#EAE5D9]). Headers should be uppercase, tracking-[0.2em], text-xs, text-[#737373]. Use sticky headers for vertical scrolling. Important columns like 'Bill No' should be boulder. Row hover should be bg-[#FDFBF7].",
+    "buttons": "Primary buttons use Deep Emerald (#0A3626) with white text. Secondary buttons are transparent with 1px border (#EAE5D9) and charcoal text. Hover effects should darken the background or border slightly. Never use default blue.",
+    "badges": "Status badges (Booked, Delivered, Returned, Overdue) must use soft background tints with high-contrast text, softly rounded (rounded-full) and bold text-xs. e.g. Overdue uses danger_bg and danger_text.",
+    "inputs": "Forms should use transparent backgrounds or solid white with a 1px border (#EAE5D9). Focus states must ring with Deep Emerald (focus:ring-2 focus:ring-[#0A3626]/20 focus:border-[#0A3626])."
+  },
+  "motion_and_interaction": {
+    "hover_transitions": "transition-all duration-200 ease-in-out",
+    "loading_state": "Use subtle pulsing skeletons (animate-pulse) with #EAE5D9 color, avoid standard gray skeletons."
+  },
+  "testing": {
+    "data_testid_requirement": "All interactive elements (buttons, inputs, filters, table rows, edit/delete actions, pagination) MUST include a 'data-testid' attribute in kebab-case based on role (e.g., data-testid='create-booking-button')."
+  },
+  "domain_specific_rules": {
+    "currency": "Always format currency as INR (₹). E.g. ₹ 15,000",
+    "date_format": "Use clear date formats (e.g., 12 Oct 2026) for Booking, Delivery, and Return dates.",
+    "data_density": "Table contains many columns (Bill No, Product Code, Dates, Amounts, Customer Info). Implement a sticky first column (Bill No) and horizontal scrolling. Provide an 'expand' or 'view details' action for full record inspection."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1570212773364-e30cd076539e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwzfHxpbmRpYW4lMjBicmlkYWwlMjBqZXdlbGxlcnl8ZW58MHx8fHwxNzgxMzU4NTg2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Woman wearing wedding sari (use as placeholder for premium product/customer context)",
+        "category": "placeholder"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1617633150878-7df1d12a9a57?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwyfHxpbmRpYW4lMjBicmlkYWwlMjBqZXdlbGxlcnl8ZW58MHx8fHwxNzgxMzU4NTg2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Woman in red and gold sari (use for dashboard welcome banner background with heavy white overlay)",
+        "category": "background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1600685890506-593fdf55949b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjBicmlkYWwlMjBqZXdlbGxlcnl8ZW58MHx8fHwxNzgxMzU4NTg2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Woman in gold crown (jewellery placeholder)",
+        "category": "placeholder"
+      }
+    ],
+    "instructions_to_main_agent": "Use lucide-react for icons. Apply the specific typography and spacing rules. Use Shadcn UI for the data table and form components, but strip away the default Vercel-like borders/shadows and apply our 'border-[#EAE5D9]' and flat surface rules. Ensure currency is formatted in INR (₹) explicitly."
+  }
+}
