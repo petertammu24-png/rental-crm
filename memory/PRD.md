@@ -41,7 +41,13 @@
 - ✅ 21/21 RBAC backend tests pass; frontend route-gating verified via Playwright
 
 ## Backlog
-### P1
+### Iteration 3 (Feb 2026) — P1 features ✅
+- ✅ **Printable branch-aware invoice** at `/invoice/:id` — clean light card with branch name/address/phone, customer + item blocks, amount breakdown incl. rental balance, signature line. Uses browser native print → Save as PDF.
+- ✅ **CSV export** on Bookings page — exports the currently filtered list with 18 columns; UTF-8 BOM, proper escaping.
+- ✅ **Customer master list** at `/customers` (branch-scoped) — aggregates by phone, shows total bookings, total rental, advance paid, outstanding to collect/refund, last booking date, branch badges. Detail dialog shows full booking history with one-click invoice link.
+- ✅ 13/13 new backend tests pass; full frontend flow verified for super_admin + manager.
+
+### Next P1
 - Per-booking detail page with payment-history timeline
 - CSV / PDF export of bookings + invoice printout (branch-aware header)
 - Customer master list (de-duped customer profile across bookings)
