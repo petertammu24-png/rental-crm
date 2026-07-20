@@ -40,6 +40,12 @@
 - ✅ Hidden edit/delete buttons for Staff role
 - ✅ 21/21 RBAC backend tests pass; frontend route-gating verified via Playwright
 
+### Iteration 4 (Feb 2026) — P2 features
+- ✅ **Per-branch monthly revenue chart** on Dashboard — recharts BarChart, gradient bars, 12-month window; stacks by branch when super_admin views "All branches", auto-collapses to single-series when filtered to one branch; branch-scoped for managers/staff.
+- ✅ **Jewellery photo upload** — up to 5 photos per booking via Emergent object storage. Multipart POST /api/bookings/{id}/photos with content-type + size validation (JPG/PNG/WebP, ≤8 MB). Photos served via authenticated /api/files/{id}?auth=<token>. Thumbnail grid with hover-to-delete inside the edit dialog. Managers can delete; staff can only view.
+- ✅ **Audit log** — every create/update/delete on branches, users, bookings, and photos is captured to `audit_log` collection with user, entity, summary, branch, timestamp. `/audit` page with search + action + entity + branch filters. Super admin sees everything; managers see own branch only; staff has no access (403).
+- ✅ 22/22 backend tests pass; full frontend flow verified for super_admin + manager.
+
 ## Backlog
 ### Iteration 3 (Feb 2026) — P1 features ✅
 - ✅ **Printable branch-aware invoice** at `/invoice/:id` — clean light card with branch name/address/phone, customer + item blocks, amount breakdown incl. rental balance, signature line. Uses browser native print → Save as PDF.
