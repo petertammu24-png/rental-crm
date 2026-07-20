@@ -14,6 +14,7 @@ import {
 import { apiClient } from "@/lib/api";
 import { formatINR, formatDate, statusTone } from "@/lib/format";
 import { useAuth } from "@/context/AuthContext";
+import { RevenueChart } from "@/components/RevenueChart";
 
 const StatCard = ({ label, value, icon: Icon, subtitle, testId, accent }) => (
   <div className="neu-sm p-5 transition-transform hover:-translate-y-0.5" data-testid={testId}>
@@ -164,6 +165,12 @@ export default function Dashboard() {
           icon={ArrowUpFromLine}
           accent="linear-gradient(135deg,#7E2C3E,#E04F6B)"
         />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="lg:col-span-2">
+          <RevenueChart branchFilter={branchFilter} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

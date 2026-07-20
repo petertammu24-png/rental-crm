@@ -11,6 +11,7 @@ import {
 import { apiClient, formatApiErrorDetail } from "@/lib/api";
 import { todayISO } from "@/lib/format";
 import { useAuth } from "@/context/AuthContext";
+import { PhotoUploader } from "@/components/PhotoUploader";
 
 const empty = () => ({
   bill_no: "",
@@ -310,6 +311,18 @@ export const BookingFormDialog = ({ open, onOpenChange, booking, onSaved, branch
               />
             </Field>
           </Section>
+
+          {booking?.id && (
+            <Section title="Jewellery photos">
+              <div className="sm:col-span-2">
+                <PhotoUploader
+                  bookingId={booking.id}
+                  photos={booking.photos || []}
+                  onChange={() => { /* parent reloads on save */ }}
+                />
+              </div>
+            </Section>
+          )}
 
           <DialogFooter className="pt-2 gap-2">
             <button

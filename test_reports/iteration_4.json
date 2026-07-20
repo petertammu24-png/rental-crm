@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 4 (P2 features: revenue chart, jewellery photo upload, audit log) tested end-to-end. All 22 backend pytest cases pass. Frontend flows for Dashboard revenue chart, Audit page (nav+render+filters), and PhotoUploader visibility (edit-only) all verified. Storage happy-path (upload -> photos field on booking -> file serve -> delete) works. Max-5 photos cap, content-type reject, oversize reject all fire. Booking/branch/user regression endpoints intact.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global", "issues": ["Console hydration warning: '<span> cannot be a child of <option>' — Select component renders spans inside native <option>. Not blocking, but should be cleaned up."]},
+      {"screen": "Dashboard", "issues": ["Initial Recharts ResponsiveContainer warning: 'width(-1) and height(-1)' fired briefly on first paint before layout settled. Chart renders correctly after; consider providing minWidth/minHeight or checking parent flex sizing."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4_p2.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "(Low priority) Fix Radix/native Select rendering that puts <span> inside <option> to eliminate the hydration console warning.",
+    "(Low priority) Add minWidth/minHeight to RevenueChart's ResponsiveContainer to silence the initial recharts warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~970 lines — approaching the 700-line split threshold. Consider extracting routers (bookings, users, branches, files/photos, audit, stats) into separate modules.",
+    "log_action swallows all exceptions silently (logging.warning only). Acceptable for best-effort auditing but no retry/dead-letter — flag for future.",
+    "requests library is used synchronously inside asyncio.to_thread for object storage; fine but adds thread overhead. Could switch to httpx.AsyncClient for consistency.",
+    "/api/files/{id} passes JWT via query string (?auth=). Acceptable for <img> tags but note that query-string tokens can leak into server logs. Consider short-lived signed URLs in a future iteration."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration4_p2.py"],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% for tested flows"},
+  "test_credentials": "admin@jewel.com / admin123 (super_admin); mgr.bng@banglzz.com / manager123 (manager BNG); test staff users auto-created with 'test_staff_' prefix and cleaned up after.",
+  "seed_data_creation": "Test fixtures auto-create BNG branch & manager if missing, plus ephemeral staff and bookings that are cleaned up.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter4 tests live in /app/backend/tests/test_iteration4_p2.py. Run with `export $(grep -v '^#' /app/frontend/.env | xargs) && pytest backend/tests/test_iteration4_p2.py`. Storage service was reachable in this env — happy-path upload works. If it becomes flaky, the endpoint validation tests (content-type/size/max-count) still run before the storage call and remain deterministic.",
+  "rca of the issue": "No issues to RCA — all features working as spec'd."
+}

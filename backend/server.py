@@ -4,15 +4,18 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import os
+import asyncio
 import logging
 import uuid
 import re
 import bcrypt
 import jwt
+import requests
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, UploadFile, File, Header, Query
+from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -26,6 +29,65 @@ db = client[os.environ['DB_NAME']]
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24
+
+# ---------- Object storage ----------
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+APP_NAME = "banglzz-crm"
+MAX_PHOTOS_PER_BOOKING = 5
+ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MIME_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+_storage_key: Optional[str] = None
+
+
+def init_storage() -> Optional[str]:
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        return None
+    try:
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": key}, timeout=30)
+        resp.raise_for_status()
+        _storage_key = resp.json()["storage_key"]
+        return _storage_key
+    except Exception as e:
+        logging.error("Storage init failed: %s", e)
+        return None
+
+
+def _put_object_sync(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    if not key:
+        raise RuntimeError("Storage not initialized")
+    resp = requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data, timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _get_object_sync(path: str) -> tuple:
+    key = init_storage()
+    if not key:
+        raise RuntimeError("Storage not initialized")
+    resp = requests.get(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key}, timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+async def put_object(path: str, data: bytes, content_type: str) -> dict:
+    return await asyncio.to_thread(_put_object_sync, path, data, content_type)
+
+
+async def get_object(path: str) -> tuple:
+    return await asyncio.to_thread(_get_object_sync, path)
+
 
 app = FastAPI(title="Banglzz & Kalyani Covering CRM")
 api_router = APIRouter(prefix="/api")
@@ -86,6 +148,33 @@ async def get_current_user(
 def require_role(user: dict, allowed: set):
     if user.get("role") not in allowed:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+# ---------- Audit log ----------
+async def log_action(
+    current: dict,
+    action: str,
+    entity_type: str,
+    entity_id: Optional[str],
+    summary: str,
+    branch_id: Optional[str] = None,
+):
+    try:
+        await db.audit_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "summary": summary,
+            "user_id": current.get("id"),
+            "user_email": current.get("email"),
+            "user_name": current.get("name"),
+            "user_role": current.get("role"),
+            "branch_id": branch_id if branch_id is not None else current.get("branch_id"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logging.warning("Audit log failed: %s", e)
 
 
 # ---------- Models ----------
@@ -217,6 +306,8 @@ async def create_branch(data: BranchCreate, current=Depends(get_current_user)):
     }
     await db.branches.insert_one(doc)
     doc.pop("_id", None)
+    await log_action(current, "create", "branch", doc["id"],
+                     f"Created branch {doc['code']} ({doc['name']})", branch_id=doc["id"])
     return doc
 
 
@@ -252,6 +343,7 @@ async def delete_branch(branch_id: str, current=Depends(get_current_user)):
     res = await db.branches.delete_one({"id": branch_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Branch not found")
+    await log_action(current, "delete", "branch", branch_id, "Deleted branch", branch_id=branch_id)
     return {"ok": True}
 
 
@@ -297,6 +389,8 @@ async def create_user(data: UserCreate, current=Depends(get_current_user)):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.users.insert_one(doc)
+    await log_action(current, "create", "user", doc["id"],
+                     f"Created {role} {doc['email']}", branch_id=branch_id)
     return public_user(doc)
 
 
@@ -330,6 +424,8 @@ async def update_user(user_id: str, data: UserUpdate, current=Depends(get_curren
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
     res = await db.users.find_one_and_update({"id": user_id}, {"$set": update}, return_document=True)
+    await log_action(current, "update", "user", user_id,
+                     f"Updated user {res.get('email')}", branch_id=res.get("branch_id"))
     return public_user(res)
 
 
@@ -346,6 +442,8 @@ async def delete_user(user_id: str, current=Depends(get_current_user)):
     if target["id"] == current["id"]:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
     await db.users.delete_one({"id": user_id})
+    await log_action(current, "delete", "user", user_id,
+                     f"Deleted user {target.get('email')}", branch_id=target.get("branch_id"))
     return {"ok": True}
 
 
@@ -399,6 +497,8 @@ async def create_booking(data: BookingCreate, current=Depends(get_current_user))
     doc["created_by"] = current["id"]
     await db.bookings.insert_one(doc)
     doc.pop("_id", None)
+    await log_action(current, "create", "booking", doc["id"],
+                     f"Created booking {bill_no} for {data.customer.name}", branch_id=branch_id)
     return doc
 
 
@@ -451,6 +551,10 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.bookings.find_one_and_update({"id": booking_id}, {"$set": update}, return_document=True)
     res.pop("_id", None)
+    changed = [k for k in update.keys() if k != "updated_at"]
+    await log_action(current, "update", "booking", booking_id,
+                     f"Updated booking {res.get('bill_no')} ({', '.join(changed[:4])})",
+                     branch_id=res.get("branch_id"))
     return res
 
 
@@ -458,9 +562,13 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
 async def delete_booking(booking_id: str, current=Depends(get_current_user)):
     require_role(current, {ROLE_SUPER, ROLE_MANAGER})
     q = {"id": booking_id, **booking_scope(current)}
-    res = await db.bookings.delete_one(q)
-    if res.deleted_count == 0:
+    existing = await db.bookings.find_one(q)
+    if not existing:
         raise HTTPException(status_code=404, detail="Booking not found")
+    await db.bookings.delete_one(q)
+    await log_action(current, "delete", "booking", booking_id,
+                     f"Deleted booking {existing.get('bill_no')}",
+                     branch_id=existing.get("branch_id"))
     return {"ok": True}
 
 
@@ -544,6 +652,211 @@ async def list_customers(
     return out
 
 
+# ---------- Photo uploads ----------
+@api_router.post("/bookings/{booking_id}/photos")
+async def upload_booking_photo(
+    booking_id: str,
+    file: UploadFile = File(...),
+    current=Depends(get_current_user),
+):
+    q = {"id": booking_id, **booking_scope(current)}
+    booking = await db.bookings.find_one(q)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_PHOTO_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, or WebP images are allowed")
+    photos = booking.get("photos") or []
+    if len(photos) >= MAX_PHOTOS_PER_BOOKING:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_PHOTOS_PER_BOOKING} photos per booking")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 8 MB)")
+    ext = MIME_EXT.get(content_type, "bin")
+    file_id = str(uuid.uuid4())
+    storage_path = f"{APP_NAME}/bookings/{booking_id}/{file_id}.{ext}"
+    try:
+        result = await put_object(storage_path, data, content_type)
+    except Exception as e:
+        logging.error("Photo upload failed: %s", e)
+        raise HTTPException(status_code=500, detail="Photo upload failed")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    photo_meta = {
+        "id": file_id,
+        "storage_path": result.get("path", storage_path),
+        "content_type": content_type,
+        "original_filename": file.filename or f"{file_id}.{ext}",
+        "size": result.get("size", len(data)),
+        "created_at": now_iso,
+        "is_deleted": False,
+    }
+    await db.files.insert_one({**photo_meta, "booking_id": booking_id})
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$push": {"photos": photo_meta}, "$set": {"updated_at": now_iso}},
+    )
+    await log_action(current, "create", "photo", file_id,
+                     f"Uploaded photo to {booking.get('bill_no')}",
+                     branch_id=booking.get("branch_id"))
+    return photo_meta
+
+
+@api_router.delete("/bookings/{booking_id}/photos/{photo_id}")
+async def delete_booking_photo(
+    booking_id: str, photo_id: str, current=Depends(get_current_user),
+):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    q = {"id": booking_id, **booking_scope(current)}
+    booking = await db.bookings.find_one(q)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$pull": {"photos": {"id": photo_id}},
+         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    await db.files.update_one({"id": photo_id}, {"$set": {"is_deleted": True}})
+    await log_action(current, "delete", "photo", photo_id,
+                     f"Removed photo from {booking.get('bill_no')}",
+                     branch_id=booking.get("branch_id"))
+    return {"ok": True}
+
+
+@api_router.get("/files/{file_id}")
+async def serve_file(
+    file_id: str,
+    auth: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    # img/<a> tags can't send Authorization header — accept ?auth=token too
+    token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1]
+    elif auth:
+        token = auth
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=[JWT_ALGORITHM])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    record = await db.files.find_one({"id": file_id, "is_deleted": False})
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+    # branch scope check
+    if record.get("booking_id"):
+        q = {"id": record["booking_id"]}
+        if user.get("role") != ROLE_SUPER:
+            q["branch_id"] = user.get("branch_id")
+        booking = await db.bookings.find_one(q)
+        if not booking:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        data, ctype = await get_object(record["storage_path"])
+    except Exception as e:
+        logging.error("File read failed: %s", e)
+        raise HTTPException(status_code=500, detail="File read failed")
+    return Response(content=data, media_type=record.get("content_type") or ctype)
+
+
+# ---------- Audit log ----------
+@api_router.get("/audit")
+async def list_audit(
+    search: Optional[str] = None,
+    action: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    limit: int = 200,
+    current=Depends(get_current_user),
+):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    q: dict = {}
+    if current["role"] == ROLE_MANAGER:
+        q["branch_id"] = current.get("branch_id")
+    elif branch_id and branch_id != "all":
+        q["branch_id"] = branch_id
+    if action and action != "all":
+        q["action"] = action
+    if entity_type and entity_type != "all":
+        q["entity_type"] = entity_type
+    if search:
+        s = search.strip()
+        q["$or"] = [
+            {"summary": {"$regex": s, "$options": "i"}},
+            {"user_email": {"$regex": s, "$options": "i"}},
+            {"user_name": {"$regex": s, "$options": "i"}},
+        ]
+    items = await db.audit_log.find(q, {"_id": 0}).sort("created_at", -1).to_list(max(1, min(limit, 500)))
+    return items
+
+
+# ---------- Revenue stats ----------
+@api_router.get("/stats/revenue")
+async def revenue_stats(
+    months: int = 12,
+    branch_id: Optional[str] = None,
+    current=Depends(get_current_user),
+):
+    months = max(1, min(months, 24))
+    today = datetime.now(timezone.utc).date()
+    # Build last N months keys e.g. "2026-02"
+    first_of_month = today.replace(day=1)
+    cursor = first_of_month
+    keys: list = []
+    for _ in range(months):
+        keys.append(cursor.strftime("%Y-%m"))
+        # step back one month
+        prev_year = cursor.year if cursor.month > 1 else cursor.year - 1
+        prev_month = cursor.month - 1 if cursor.month > 1 else 12
+        cursor = cursor.replace(year=prev_year, month=prev_month, day=1)
+    keys.reverse()
+
+    q = booking_scope(current)
+    if current["role"] == ROLE_SUPER and branch_id and branch_id != "all":
+        q["branch_id"] = branch_id
+
+    bookings = await db.bookings.find(q, {"_id": 0}).to_list(20000)
+    branches = await db.branches.find({}, {"_id": 0}).to_list(500)
+    branch_map = {b["id"]: b for b in branches}
+
+    # series = [{month, total, advance_paid, BNG: 1000, KLN: 500, ...}]
+    series: list = []
+    visible_branch_codes: set = set()
+    for key in keys:
+        row = {"month": key, "total": 0.0, "advance_paid": 0.0}
+        for b in branches:
+            row[b["code"]] = 0.0
+        series.append(row)
+    by_key = {row["month"]: row for row in series}
+
+    for b in bookings:
+        bd = (b.get("booking_date") or "")[:7]
+        row = by_key.get(bd)
+        if not row:
+            continue
+        amt = float(b.get("rental_amount") or 0)
+        adv = float(b.get("advance_paid") or 0)
+        row["total"] += amt
+        row["advance_paid"] += adv
+        br = branch_map.get(b.get("branch_id"))
+        if br:
+            row[br["code"]] += amt
+            visible_branch_codes.add(br["code"])
+
+    for row in series:
+        for k, v in list(row.items()):
+            if k != "month":
+                row[k] = round(v, 2)
+
+    return {
+        "series": series,
+        "branch_codes": sorted(list(visible_branch_codes)),
+    }
+
+
 # ---------- Stats ----------
 @api_router.get("/stats/dashboard")
 async def dashboard_stats(branch_id: Optional[str] = None, current=Depends(get_current_user)):
@@ -590,6 +903,17 @@ async def on_startup():
     await db.bookings.create_index("bill_no", unique=True)
     await db.bookings.create_index("branch_id")
     await db.bookings.create_index("status")
+    await db.audit_log.create_index("created_at")
+    await db.audit_log.create_index("entity_id")
+    await db.audit_log.create_index("branch_id")
+    await db.files.create_index("id", unique=True)
+    await db.files.create_index("booking_id")
+
+    # Init object storage (best-effort)
+    try:
+        await asyncio.to_thread(init_storage)
+    except Exception as e:
+        logging.warning("Storage init failed: %s", e)
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@jewel.com").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")

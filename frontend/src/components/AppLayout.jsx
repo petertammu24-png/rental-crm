@@ -10,6 +10,7 @@ import {
   Menu,
   X,
   Users as UsersIcon,
+  History,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { roleLabel } from "@/lib/format";
@@ -26,6 +27,7 @@ const navItemsFor = (role) => {
   }
   if (role === "super_admin" || role === "manager") {
     items.push({ to: "/users", label: "Users", icon: UserCog, end: false });
+    items.push({ to: "/audit", label: "Audit", icon: History, end: false });
   }
   return items;
 };

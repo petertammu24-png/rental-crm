@@ -12,6 +12,7 @@ import Branches from "@/pages/Branches";
 import Users from "@/pages/Users";
 import Customers from "@/pages/Customers";
 import Invoice from "@/pages/Invoice";
+import AuditLog from "@/pages/AuditLog";
 
 function App() {
   return (
@@ -51,6 +52,14 @@ function App() {
                 element={
                   <RoleRoute roles={["super_admin", "manager"]}>
                     <Users />
+                  </RoleRoute>
+                }
+              />
+              <Route
+                path="/audit"
+                element={
+                  <RoleRoute roles={["super_admin", "manager"]}>
+                    <AuditLog />
                   </RoleRoute>
                 }
               />
