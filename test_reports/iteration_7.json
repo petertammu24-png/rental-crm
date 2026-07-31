@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 7 backend and frontend testing completed against the public URL. Sequential availability rules, Returned/custom-code exceptions, update conflict handling, schedule/scoping/totals, stock-filtered revenue, BNG/KLN prefixes, CRUD regressions, login hint removal, branch-aware bill UX, overlap toast/dialog behavior, stock schedule UI, and mobile layout passed. One critical race remains: concurrent overlapping creates admitted two bookings in both runs (2/2 reproduction).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/bookings",
+        "issue": "Overlap enforcement is not atomic. Eight simultaneous creates for one stock and identical 2026-08-20..2026-08-25 dates produced two HTTP 200 bookings and six 409 responses in both the initial run and retry, so real concurrent users can double-book stock.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/bookings",
+        "issue": "Rejected overlap attempts consume auto bill numbers because next_bill_no runs before conflict validation; failed 409 requests therefore create branch sequence gaps."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Revenue charts",
+        "issue": "Recharts repeatedly logs that ResponsiveContainer width/height are -1 while dashboard/stock routes mount. Charts rendered after layout in tested desktop/mobile flows, so this is non-blocking but indicates unstable initial measurement.",
+        "selector": ".recharts-responsive-container",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7_availability.py",
+    "/app/test_reports/pytest/iter7_results.xml",
+    "/app/test_reports/pytest/iter7_concurrency_retry.xml"
+  ],
+  "action_items": [
+    "Make conflict-check plus booking insert atomic/serialized per stock; for example, transactionally update a per-stock lock/version document before rechecking and inserting, or reserve each occupied stock/date under a unique index.",
+    "Apply the same serialization strategy to availability-relevant booking updates so concurrent create/update operations cannot race.",
+    "Run next_bill_no only after availability validation, or allocate the number inside the same atomic commit, if branch bill sequences must not contain conflict-generated gaps.",
+    "Add a stable min-width/min-height or defer Recharts rendering until its parent has measurable dimensions to remove negative-size warnings."
+  ],
+  "critical_code_review_comments": [
+    "check_stock_conflict performs a read followed by a separate insert/update with no transaction, lock, unique reservation constraint, or compare-and-swap; this is a confirmed TOCTOU race, not a theoretical concern.",
+    "create_booking increments the branch counter before stock validation/conflict detection, so every rejected overlap burns a bill number.",
+    "server.py is 1,353 lines, above the 700-line maintainability threshold; availability, stock schedule, bookings, and stats should be split into focused routers/services."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7_availability.py"
+  ],
+  "success_rate": {
+    "backend": "89% (8/9 scenarios passed; concurrency failure reproduced 2/2 runs)",
+    "frontend": "100% of requested functional flows passed on desktop; stock schedule also passed at 390x844, with one non-blocking chart console warning"
+  },
+  "seed_data_creation": "Created TEST_I7_-prefixed stock and booking records, including concurrent overlap attempts and one isolated UI stock/booking. All test-created records were cleaned up; pre-existing JS-001 / BNG-0021 was only read.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Re-run test_iteration7_availability.py, especially test_concurrent_overlapping_creates_allow_exactly_one_booking. Current failure consistently yields two successful overlapping bookings out of eight. Sequential overlap and all requested UI flows pass. Browser's first comprehensive script had a test-only SVG selector assertion failure after the schedule was visibly correct; corrected retry passed using the responsive-container selector.",
+  "rca_of_the_issue": "create_booking awaits check_stock_conflict and later performs insert_one as separate operations. Concurrent requests can all read no conflict before either insert becomes visible, then multiple inserts succeed. Reproduced twice with eight parallel requests; each run persisted exactly two overlapping active bookings. The bill counter is incremented even earlier, which independently explains sequence gaps on every rejected request."
+}

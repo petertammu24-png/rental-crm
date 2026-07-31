@@ -483,6 +483,27 @@ def booking_scope(current: dict) -> dict:
     return {"branch_id": current.get("branch_id")}
 
 
+async def check_stock_conflict(
+    stock_id: str,
+    booking_date: str,
+    return_date: str,
+    exclude_booking_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Return the first overlapping booking (Booked or Delivered) for this stock, or None."""
+    if not stock_id or not booking_date or not return_date:
+        return None
+    q = {
+        "stock_id": stock_id,
+        "status": {"$in": ["Booked", "Delivered"]},
+        "booking_date": {"$lte": return_date},
+        "return_date": {"$gte": booking_date},
+    }
+    if exclude_booking_id:
+        q["id"] = {"$ne": exclude_booking_id}
+    conflict = await db.bookings.find_one(q, {"_id": 0})
+    return conflict
+
+
 @api_router.post("/bookings")
 async def create_booking(data: BookingCreate, current=Depends(get_current_user)):
     if current["role"] == ROLE_SUPER:
@@ -516,6 +537,20 @@ async def create_booking(data: BookingCreate, current=Depends(get_current_user))
     if doc.get("stock_id"):
         stock = await db.stock_items.find_one({"id": doc["stock_id"], "branch_id": branch_id}, {"_id": 0})
         if stock:
+            # Conflict check: same stock booked overlapping dates
+            if doc.get("status") in ("Booked", "Delivered"):
+                conflict = await check_stock_conflict(
+                    doc["stock_id"], doc["booking_date"], doc["return_date"]
+                )
+                if conflict:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"This item is already booked from {conflict['booking_date']} to "
+                            f"{conflict['return_date']} (bill {conflict['bill_no']}). "
+                            f"Please choose different dates or another item."
+                        ),
+                    )
             doc["stock_photos"] = [p for p in (stock.get("photos") or []) if not p.get("is_deleted")]
             if not doc.get("product_name"):
                 doc["product_name"] = stock.get("name") or ""
@@ -595,6 +630,27 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
     elif unlink_stock:
         update["stock_id"] = None
         update["stock_photos"] = []
+    # Overlap check if stock or dates changed
+    effective_stock = update.get("stock_id", existing.get("stock_id"))
+    effective_start = update.get("booking_date", existing.get("booking_date"))
+    effective_end = update.get("return_date", existing.get("return_date"))
+    effective_status = update.get("status", existing.get("status"))
+    if (
+        effective_stock
+        and effective_status in ("Booked", "Delivered")
+        and any(k in update for k in ("stock_id", "booking_date", "return_date", "status"))
+    ):
+        conflict = await check_stock_conflict(
+            effective_stock, effective_start, effective_end, exclude_booking_id=booking_id
+        )
+        if conflict:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This item is already booked from {conflict['booking_date']} to "
+                    f"{conflict['return_date']} (bill {conflict['bill_no']})."
+                ),
+            )
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.bookings.find_one_and_update({"id": booking_id}, {"$set": update}, return_document=True)
     res.pop("_id", None)
@@ -733,6 +789,70 @@ async def get_stock(stock_id: str, current=Depends(get_current_user)):
     if not item:
         raise HTTPException(status_code=404, detail="Stock item not found")
     return item
+
+
+@api_router.get("/stock/{stock_id}/schedule")
+async def stock_schedule(
+    stock_id: str,
+    months: int = 12,
+    current=Depends(get_current_user),
+):
+    """Return this stock's booked date-ranges + monthly revenue series (last N months)."""
+    q = {"id": stock_id, **stock_scope(current)}
+    stock = await db.stock_items.find_one(q, {"_id": 0})
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    bookings = await db.bookings.find(
+        {"stock_id": stock_id}, {"_id": 0}
+    ).sort("booking_date", 1).to_list(1000)
+
+    # Revenue series (same shape helper as /api/stats/revenue but single stock)
+    months = max(1, min(months, 24))
+    today = datetime.now(timezone.utc).date()
+    cursor = today.replace(day=1)
+    keys: list = []
+    for _ in range(months):
+        keys.append(cursor.strftime("%Y-%m"))
+        prev_year = cursor.year if cursor.month > 1 else cursor.year - 1
+        prev_month = cursor.month - 1 if cursor.month > 1 else 12
+        cursor = cursor.replace(year=prev_year, month=prev_month, day=1)
+    keys.reverse()
+    series = [{"month": k, "total": 0.0, "advance_paid": 0.0} for k in keys]
+    by_key = {r["month"]: r for r in series}
+    for b in bookings:
+        bd = (b.get("booking_date") or "")[:7]
+        row = by_key.get(bd)
+        if not row:
+            continue
+        row["total"] += float(b.get("rental_amount") or 0)
+        row["advance_paid"] += float(b.get("advance_paid") or 0)
+    for row in series:
+        row["total"] = round(row["total"], 2)
+        row["advance_paid"] = round(row["advance_paid"], 2)
+
+    today_iso = today.isoformat()
+    upcoming = [
+        b for b in bookings
+        if b.get("status") in ("Booked", "Delivered") and (b.get("return_date") or "") >= today_iso
+    ]
+    total_rented_days = 0
+    for b in bookings:
+        try:
+            s = datetime.fromisoformat(b["booking_date"]).date()
+            e = datetime.fromisoformat(b["return_date"]).date()
+            total_rented_days += max((e - s).days + 1, 1)
+        except Exception:
+            continue
+
+    return {
+        "stock": stock,
+        "bookings": bookings,
+        "upcoming": upcoming,
+        "series": series,
+        "total_bookings": len(bookings),
+        "total_rented_days": total_rented_days,
+        "total_revenue": round(sum(float(b.get("rental_amount") or 0) for b in bookings), 2),
+    }
 
 
 @api_router.post("/stock")
@@ -1055,6 +1175,7 @@ async def list_audit(
 async def revenue_stats(
     months: int = 12,
     branch_id: Optional[str] = None,
+    stock_id: Optional[str] = None,
     current=Depends(get_current_user),
 ):
     months = max(1, min(months, 24))
@@ -1074,6 +1195,8 @@ async def revenue_stats(
     q = booking_scope(current)
     if current["role"] == ROLE_SUPER and branch_id and branch_id != "all":
         q["branch_id"] = branch_id
+    if stock_id:
+        q["stock_id"] = stock_id
 
     bookings = await db.bookings.find(q, {"_id": 0}).to_list(20000)
     branches = await db.branches.find({}, {"_id": 0}).to_list(500)

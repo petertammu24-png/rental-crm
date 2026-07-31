@@ -289,11 +289,19 @@ export const BookingFormDialog = ({ open, onOpenChange, booking, onSaved, branch
                 </div>
               </Field>
             )}
-            <Field label="Bill No" hint="Leave blank for auto-generation">
+            <Field label="Bill No" hint={
+              currentBranchId && branches.length > 0
+                ? `Leave blank for auto: ${(branches.find(b => b.id === currentBranchId)?.code) || "BRANCH"}-####`
+                : "Leave blank for auto-generation with branch prefix"
+            }>
               <input
                 value={form.bill_no}
                 onChange={(e) => set("bill_no", e.target.value)}
-                placeholder="Auto"
+                placeholder={
+                  currentBranchId && branches.length > 0
+                    ? `Auto (${(branches.find(b => b.id === currentBranchId)?.code) || "BRANCH"}-####)`
+                    : "Auto"
+                }
                 className="neu-input w-full px-3 py-2.5 text-sm"
                 data-testid="form-bill-no"
               />

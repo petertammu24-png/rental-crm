@@ -7,11 +7,13 @@ import {
   Trash2,
   Package,
   Camera,
+  CalendarClock,
 } from "lucide-react";
 import { apiClient, API, TOKEN_KEY, formatApiErrorDetail } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, todayISO } from "@/lib/format";
 import { useAuth } from "@/context/AuthContext";
 import { PhotoUploader } from "@/components/PhotoUploader";
+import { StockSchedule } from "@/components/StockSchedule";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +56,7 @@ export default function Stock() {
   const [form, setForm] = useState(emptyStock());
   const [submitting, setSubmitting] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
+  const [scheduleFor, setScheduleFor] = useState(null);
   const token = localStorage.getItem(TOKEN_KEY);
 
   const branchMap = useMemo(() => {
@@ -255,31 +258,41 @@ export default function Stock() {
                       {s.description}
                     </div>
                   )}
-                  <div className="flex items-center justify-between mt-3">
-                    <div className="text-[11px] text-[#B097D1]">
+                  <div className="flex items-center justify-between mt-3 gap-2">
+                    <div className="text-[11px] text-[#B097D1] min-w-0 truncate">
                       {(s.photos || []).filter((p) => !p.is_deleted).length} photo
                       {(s.photos || []).filter((p) => !p.is_deleted).length !== 1 && "s"}
                       {" · "}
                       Added {formatDate(s.created_at)}
                     </div>
-                    {canEdit && (
-                      <div className="flex gap-1">
-                        <button
-                          className="neu-btn w-8 h-8 flex items-center justify-center"
-                          onClick={() => openEdit(s)}
-                          data-testid={`edit-stock-${s.code}`}
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          className="neu-btn w-8 h-8 flex items-center justify-center text-[#FDB3C0]"
-                          onClick={() => setDeleteId(s.id)}
-                          data-testid={`delete-stock-${s.code}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        className="neu-btn w-8 h-8 flex items-center justify-center"
+                        onClick={() => setScheduleFor(s)}
+                        data-testid={`schedule-stock-${s.code}`}
+                        title="Schedule & revenue"
+                      >
+                        <CalendarClock className="w-3.5 h-3.5" />
+                      </button>
+                      {canEdit && (
+                        <>
+                          <button
+                            className="neu-btn w-8 h-8 flex items-center justify-center"
+                            onClick={() => openEdit(s)}
+                            data-testid={`edit-stock-${s.code}`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            className="neu-btn w-8 h-8 flex items-center justify-center text-[#FDB3C0]"
+                            onClick={() => setDeleteId(s.id)}
+                            data-testid={`delete-stock-${s.code}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -408,6 +421,12 @@ export default function Stock() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <StockSchedule
+        stock={scheduleFor}
+        open={!!scheduleFor}
+        onOpenChange={(o) => !o && setScheduleFor(null)}
+      />
 
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent className="neu border-0 text-[#F0E6FF]">

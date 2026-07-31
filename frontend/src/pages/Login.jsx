@@ -96,10 +96,6 @@ export default function Login() {
               {submitting ? "Signing in…" : "Sign in"}
             </button>
           </form>
-
-          <div className="mt-6 pt-4 border-t border-[#3D2A5C] text-[11px] text-[#B097D1] text-center">
-            Default Super Admin: <span className="text-white">admin@jewel.com</span> / <span className="text-white">admin123</span>
-          </div>
         </div>
       </div>
     </div>
