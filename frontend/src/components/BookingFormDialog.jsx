@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { toast } from "sonner";
+import { Package, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -8,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { apiClient, formatApiErrorDetail } from "@/lib/api";
+import { apiClient, API, TOKEN_KEY, formatApiErrorDetail } from "@/lib/api";
 import { todayISO } from "@/lib/format";
 import { useAuth } from "@/context/AuthContext";
 import { PhotoUploader } from "@/components/PhotoUploader";
@@ -16,6 +17,8 @@ import { PhotoUploader } from "@/components/PhotoUploader";
 const empty = () => ({
   bill_no: "",
   branch_id: "",
+  stock_id: null,
+  stock_photos: [],
   product_code: "",
   product_name: "",
   booking_date: todayISO(),
@@ -36,6 +39,14 @@ export const BookingFormDialog = ({ open, onOpenChange, booking, onSaved, branch
   const isSuper = user?.role === "super_admin";
   const [form, setForm] = useState(empty());
   const [submitting, setSubmitting] = useState(false);
+  const [stockQuery, setStockQuery] = useState("");
+  const [stockSuggestions, setStockSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [stockPhotosPreview, setStockPhotosPreview] = useState([]);
+  const stockDebounce = useRef(null);
+  const token = localStorage.getItem(TOKEN_KEY);
+
+  const currentBranchId = form.branch_id || user?.branch_id;
 
   useEffect(() => {
     if (!open) return;
@@ -51,14 +62,60 @@ export const BookingFormDialog = ({ open, onOpenChange, booking, onSaved, branch
         return_to_be_paid_to_customer: String(booking.return_to_be_paid_to_customer ?? ""),
         bill_no: booking.bill_no || "",
         branch_id: booking.branch_id || "",
+        stock_id: booking.stock_id || null,
+        stock_photos: booking.stock_photos || [],
       });
+      setStockPhotosPreview(booking.stock_photos || []);
+      setStockQuery("");
     } else {
       const init = empty();
       if (!isSuper && user?.branch_id) init.branch_id = user.branch_id;
       else if (isSuper && branches.length === 1) init.branch_id = branches[0].id;
       setForm(init);
+      setStockPhotosPreview([]);
+      setStockQuery("");
     }
   }, [open, booking, isSuper, user?.branch_id, branches]);
+
+  // Stock search
+  useEffect(() => {
+    if (!open) return;
+    if (!currentBranchId) {
+      setStockSuggestions([]);
+      return;
+    }
+    if (stockDebounce.current) clearTimeout(stockDebounce.current);
+    stockDebounce.current = setTimeout(async () => {
+      try {
+        const params = { branch_id: currentBranchId };
+        if (stockQuery.trim()) params.search = stockQuery.trim();
+        const { data } = await apiClient.get("/stock", { params });
+        setStockSuggestions(data.slice(0, 8));
+      } catch {
+        setStockSuggestions([]);
+      }
+    }, 250);
+  }, [stockQuery, currentBranchId, open]);
+
+  const applyStock = (s) => {
+    const activePhotos = (s.photos || []).filter((p) => !p.is_deleted);
+    setForm((f) => ({
+      ...f,
+      product_code: s.code,
+      product_name: s.name,
+      stock_id: s.id,
+      stock_photos: activePhotos,
+    }));
+    setStockPhotosPreview(activePhotos);
+    setStockQuery("");
+    setShowSuggestions(false);
+    toast.success(`Loaded ${s.code} — ${s.name}`);
+  };
+
+  const clearStock = () => {
+    setForm((f) => ({ ...f, stock_id: null, stock_photos: [] }));
+    setStockPhotosPreview([]);
+  };
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const setC = (key, value) =>
@@ -75,6 +132,7 @@ export const BookingFormDialog = ({ open, onOpenChange, booking, onSaved, branch
       ...form,
       bill_no: form.bill_no?.trim() || null,
       branch_id: form.branch_id || null,
+      stock_id: form.stock_id || null,
       rental_amount: Number(form.rental_amount || 0),
       total_advance: Number(form.total_advance || 0),
       advance_paid: Number(form.advance_paid || 0),
@@ -132,6 +190,103 @@ export const BookingFormDialog = ({ open, onOpenChange, booking, onSaved, branch
                     </option>
                   ))}
                 </select>
+              </Field>
+            )}
+            <Field
+              label="Load from stock"
+              full
+              hint="Type a stock code or name to auto-fill the item and copy its photos onto this bill"
+            >
+              <div className="relative">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Package className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#B097D1] z-10" />
+                    <input
+                      value={stockQuery}
+                      onChange={(e) => {
+                        setStockQuery(e.target.value);
+                        setShowSuggestions(true);
+                      }}
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      placeholder={currentBranchId ? "Search stock code or name…" : "Choose a branch first"}
+                      disabled={!currentBranchId}
+                      className="neu-input w-full pl-10 pr-3 py-2.5 text-sm disabled:opacity-50"
+                      data-testid="form-stock-search"
+                    />
+                  </div>
+                  {form.stock_id && (
+                    <button
+                      type="button"
+                      onClick={clearStock}
+                      className="neu-btn px-3 py-2 text-xs inline-flex items-center gap-1"
+                      data-testid="form-stock-clear"
+                    >
+                      <X className="w-3 h-3" /> Unlink
+                    </button>
+                  )}
+                </div>
+                {showSuggestions && stockSuggestions.length > 0 && (
+                  <div
+                    className="absolute z-20 top-full left-0 right-0 mt-1 neu-sm max-h-64 overflow-y-auto"
+                    data-testid="form-stock-suggestions"
+                  >
+                    {stockSuggestions.map((s) => {
+                      const cover = (s.photos || []).find((p) => !p.is_deleted);
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyStock(s)}
+                          className="w-full px-3 py-2 flex items-center gap-3 hover:bg-[#352051] text-left transition-colors"
+                          data-testid={`form-stock-option-${s.code}`}
+                        >
+                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-[#261538] shrink-0 flex items-center justify-center">
+                            {cover ? (
+                              <img
+                                src={`${API}/files/${cover.id}?auth=${token}`}
+                                alt={s.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <Package className="w-4 h-4 text-[#5A3D85]" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-white truncate">
+                              <span className="font-mono">{s.code}</span> · {s.name}
+                            </div>
+                            {s.description && (
+                              <div className="text-[11px] text-[#B097D1] truncate">
+                                {s.description}
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Field>
+            {stockPhotosPreview.length > 0 && (
+              <Field label={`Linked stock photos (${stockPhotosPreview.length})`} full>
+                <div className="flex gap-2 flex-wrap">
+                  {stockPhotosPreview.slice(0, 5).map((p) => (
+                    <div
+                      key={p.id}
+                      className="w-16 h-16 rounded-lg overflow-hidden neu-inset"
+                      data-testid={`form-stock-photo-${p.id}`}
+                    >
+                      <img
+                        src={`${API}/files/${p.id}?auth=${token}`}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ))}
+                </div>
               </Field>
             )}
             <Field label="Bill No" hint="Leave blank for auto-generation">

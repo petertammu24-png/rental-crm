@@ -1,0 +1,77 @@
+{
+  "summary": "Iteration 5 stock module tested across public backend APIs and desktop/mobile UI. Backend pytest: 12/17 passed. Stock CRUD, branch scoping, duplicate protection, staff read/write RBAC, upload validation/max count, normal photo serve/delete, booking snapshot/resnapshot, cross-branch invalid stock clearing, stock deletion unlink with retained snapshot, snapshot file serving, and regression endpoints passed. Five failures remain: cross-branch photo deletion vulnerability, booking Unlink persistence failure on PUT, and three requested auth-hardening failures. Frontend manager/staff/super flows, stock search/autofill, photo thumbnails, invoice photo rendering/omission, and responsive layout passed; stock photo upload trigger is disabled in the stock dialog.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "DELETE /api/stock/{stock_id}/photos/{photo_id}",
+        "issue": "Photo ownership is not validated. A BNG manager used an owned BNG stock_id with a KLN stock photo_id and received 200, soft-deleting the cross-branch file. The endpoint scopes only stock_id, then updates db.files by photo_id globally.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Requested auth hardening is absent: login sets no application HttpOnly auth cookie (only Cloudflare __cf_bm), and the sixth invalid attempt after five failures still returns 401 instead of lockout/rate-limit status.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "CORS middleware /api/*",
+        "issue": "CORS accepts an unconfigured malicious origin with Access-Control-Allow-Origin: * while credentials are enabled; backend CORS_ORIGINS is '*', not an explicit allowlist.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "PUT /api/bookings/{id}",
+        "issue": "Sending {\"stock_id\": null} does not unlink stock or clear stock_photos; response retains the old stock_id/snapshot. This breaks persisted Unlink behavior when editing an existing booking."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "PhotoUploader in Stock form dialog",
+        "issue": "After creating a stock item, Add photo is disabled even though stockId and a valid upload endpoint exist. Directly populating the hidden file input proved upload/backend/thumbnail flow works. Root cause is disabled={uploading || !bookingId}, which ignores stockId.",
+        "selector": "[data-testid='photo-upload-trigger']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Edit booking > Unlink stock > save",
+        "issue": "The UI clears the link locally, but PUT sends stock_id=null and the backend drops null values, so an existing booking remains linked after save/reload.",
+        "affected_selectors": ["form-stock-clear", "form-submit"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5_stock.py",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "action_items": [
+    "In delete_stock_photo, require photo_id to be present in the scoped stock item's photos array and update db.files with both id and stock_id; return 404 when not matched.",
+    "Allow explicit stock_id=null in update_booking and set both stock_id=null and stock_photos=[] so edit-form Unlink persists.",
+    "Change PhotoUploader upload button disabling to uploading || !endpointBase (or uploading || (!bookingId && !stockId)).",
+    "Implement application HttpOnly authentication cookie and five-failure lockout/rate limiting per the auth playbook; update frontend credential handling accordingly.",
+    "Replace wildcard CORS with explicit configured frontend origins while retaining credentials support."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1,219 lines, well above the 700-line threshold; split auth, stock/files, bookings, RBAC, audit, and stats into focused routers/services.",
+    "update_booking builds update with `if v is not None`, which erases the semantic difference between an omitted field and an explicitly supplied null field.",
+    "delete_stock_photo pulls from one stock but independently soft-deletes any global file id, creating an IDOR/cross-tenant destructive action.",
+    "PhotoUploader derives endpointBase from stockId or bookingId correctly, but its disabled condition checks only bookingId.",
+    "Storage URL and app namespace are hardcoded in server.py instead of environment configuration; login also exposes default admin credentials in the rendered UI.",
+    "Static startup review confirms existing admin password hashes are refreshed when ADMIN_PASSWORD changes; live DB verification confirms the seeded admin hash starts with $2b$."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5_stock.py"
+  ],
+  "success_rate": {
+    "backend": "71% (12/17)",
+    "frontend": "90% of tested stock/booking/invoice flows; one blocking stock-upload control defect"
+  },
+  "seed_data_creation": "Created TEST_-prefixed stock items, bookings, and staff users plus test stock photos. Parent stock/bookings/users were cleaned up; uploaded object/file artifacts can remain orphaned because deleting stock does not remove its file records/objects.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Re-run /app/backend/tests/test_iteration5_stock.py after fixes. Expected current failures are cross-stock photo delete, PUT booking stock_id=null, auth cookie, CORS allowlist, and brute-force lockout. Super/staff/manager desktop flows and mobile Stock layout passed. Frontend photo workflow only succeeded by setting the hidden photo-file-input directly because the visible trigger is disabled. First no-photo invoice attempt had a test timing issue around suggestions; corrected direct-booking retry passed and cleaned up.",
+  "rca_of_the_issue": "Three direct implementation defects: PhotoUploader checks !bookingId instead of endpoint availability; update_booking filters out explicit nulls before unlink logic; delete_stock_photo does not bind photo_id to the scoped stock/file owner. Auth hardening is not implemented: JWT remains in localStorage, CORS is wildcard, and login has no failure counter/lockout."
+}

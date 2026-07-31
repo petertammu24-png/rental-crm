@@ -5,7 +5,7 @@ import { apiClient, API, TOKEN_KEY, formatApiErrorDetail } from "@/lib/api";
 
 const MAX_PHOTOS = 5;
 
-export const PhotoUploader = ({ bookingId, photos: initialPhotos = [], canDelete = true, onChange }) => {
+export const PhotoUploader = ({ bookingId, stockId, photos: initialPhotos = [], canDelete = true, onChange }) => {
   const [photos, setPhotos] = useState(initialPhotos);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
@@ -14,13 +14,19 @@ export const PhotoUploader = ({ bookingId, photos: initialPhotos = [], canDelete
     setPhotos(initialPhotos);
   }, [initialPhotos]);
 
+  const endpointBase = stockId
+    ? `/stock/${stockId}/photos`
+    : bookingId
+    ? `/bookings/${bookingId}/photos`
+    : null;
+
   const handlePick = () => inputRef.current?.click();
 
   const handleFiles = async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!bookingId) {
-      toast.error("Save the booking first before uploading photos");
+    if (!endpointBase) {
+      toast.error("Save first before uploading photos");
       return;
     }
     const remaining = MAX_PHOTOS - photos.length;
@@ -36,7 +42,7 @@ export const PhotoUploader = ({ bookingId, photos: initialPhotos = [], canDelete
         const form = new FormData();
         form.append("file", file);
         const { data } = await apiClient.post(
-          `/bookings/${bookingId}/photos`,
+          endpointBase,
           form,
           { headers: { "Content-Type": "multipart/form-data" } },
         );
@@ -54,9 +60,9 @@ export const PhotoUploader = ({ bookingId, photos: initialPhotos = [], canDelete
   };
 
   const handleDelete = async (photoId) => {
-    if (!bookingId) return;
+    if (!endpointBase) return;
     try {
-      await apiClient.delete(`/bookings/${bookingId}/photos/${photoId}`);
+      await apiClient.delete(`${endpointBase}/${photoId}`);
       const next = photos.filter((p) => p.id !== photoId);
       setPhotos(next);
       onChange?.(next);
@@ -129,7 +135,7 @@ export const PhotoUploader = ({ bookingId, photos: initialPhotos = [], canDelete
 
       <div className="text-[11px] text-[#B097D1]">
         Up to {MAX_PHOTOS} photos · JPG/PNG/WebP · max 8 MB each
-        {!bookingId && " · Save the booking first to add photos"}
+        {!endpointBase && " · Save first to add photos"}
       </div>
     </div>
   );

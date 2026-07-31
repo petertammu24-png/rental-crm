@@ -13,6 +13,7 @@ import Users from "@/pages/Users";
 import Customers from "@/pages/Customers";
 import Invoice from "@/pages/Invoice";
 import AuditLog from "@/pages/AuditLog";
+import Stock from "@/pages/Stock";
 
 function App() {
   return (
@@ -39,6 +40,7 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
               <Route path="/customers" element={<Customers />} />
+              <Route path="/stock" element={<Stock />} />
               <Route
                 path="/branches"
                 element={

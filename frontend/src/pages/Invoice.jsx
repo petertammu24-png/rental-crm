@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Printer, ArrowLeft } from "lucide-react";
-import { apiClient } from "@/lib/api";
+import { apiClient, API, TOKEN_KEY } from "@/lib/api";
 import { formatINR, formatDate } from "@/lib/format";
 
 export default function Invoice() {
@@ -44,6 +44,8 @@ export default function Invoice() {
 
   const rentalDue =
     Number(booking.rental_amount || 0) - Number(booking.advance_paid || 0);
+  const photos = (booking.stock_photos || []).filter((p) => !p.is_deleted);
+  const token = localStorage.getItem(TOKEN_KEY);
 
   return (
     <>
@@ -173,6 +175,30 @@ export default function Invoice() {
               </div>
             </div>
           </div>
+
+          {/* Stock photos */}
+          {photos.length > 0 && (
+            <div className="py-6 border-b border-[#E0DAF0]" data-testid="invoice-photos">
+              <div className="text-[10px] tracking-[0.25em] uppercase text-[#7A5AA6] mb-3">
+                Item photos
+              </div>
+              <div className="flex gap-3 flex-wrap">
+                {photos.slice(0, 5).map((p) => (
+                  <div
+                    key={p.id}
+                    className="w-28 h-28 rounded-lg overflow-hidden border border-[#E0DAF0] bg-[#F7F4FC]"
+                  >
+                    <img
+                      src={`${API}/files/${p.id}?auth=${token}`}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      crossOrigin="anonymous"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Amounts table */}
           <div className="py-6">

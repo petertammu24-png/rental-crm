@@ -222,6 +222,7 @@ class CustomerInfo(BaseModel):
 class BookingCreate(BaseModel):
     bill_no: Optional[str] = None
     branch_id: Optional[str] = None  # required; super_admin must supply
+    stock_id: Optional[str] = None
     product_code: str
     product_name: Optional[str] = ""
     booking_date: str
@@ -239,6 +240,7 @@ class BookingCreate(BaseModel):
 
 class BookingUpdate(BaseModel):
     bill_no: Optional[str] = None
+    stock_id: Optional[str] = None
     product_code: Optional[str] = None
     product_name: Optional[str] = None
     booking_date: Optional[str] = None
@@ -251,6 +253,21 @@ class BookingUpdate(BaseModel):
     return_to_be_paid_to_customer: Optional[float] = None
     customer: Optional[CustomerInfo] = None
     status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class StockCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = ""
+    notes: Optional[str] = ""
+    branch_id: Optional[str] = None  # required for super_admin
+
+
+class StockUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -495,6 +512,18 @@ async def create_booking(data: BookingCreate, current=Depends(get_current_user))
     doc["created_at"] = now_iso
     doc["updated_at"] = now_iso
     doc["created_by"] = current["id"]
+    # Snapshot stock photos if a stock item is linked
+    if doc.get("stock_id"):
+        stock = await db.stock_items.find_one({"id": doc["stock_id"], "branch_id": branch_id}, {"_id": 0})
+        if stock:
+            doc["stock_photos"] = [p for p in (stock.get("photos") or []) if not p.get("is_deleted")]
+            if not doc.get("product_name"):
+                doc["product_name"] = stock.get("name") or ""
+        else:
+            doc["stock_id"] = None
+            doc["stock_photos"] = []
+    else:
+        doc["stock_photos"] = []
     await db.bookings.insert_one(doc)
     doc.pop("_id", None)
     await log_action(current, "create", "booking", doc["id"],
@@ -548,6 +577,18 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
         dup = await db.bookings.find_one({"bill_no": update["bill_no"], "id": {"$ne": booking_id}})
         if dup:
             raise HTTPException(status_code=400, detail="Bill No already in use")
+    # Re-snapshot stock photos if stock_id was set/changed
+    if "stock_id" in update and update["stock_id"]:
+        stock = await db.stock_items.find_one(
+            {"id": update["stock_id"], "branch_id": existing.get("branch_id")}, {"_id": 0}
+        )
+        if stock:
+            update["stock_photos"] = [p for p in (stock.get("photos") or []) if not p.get("is_deleted")]
+            if not update.get("product_name") and not existing.get("product_name"):
+                update["product_name"] = stock.get("name") or ""
+        else:
+            update["stock_id"] = None
+            update["stock_photos"] = []
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.bookings.find_one_and_update({"id": booking_id}, {"$set": update}, return_document=True)
     res.pop("_id", None)
@@ -652,6 +693,193 @@ async def list_customers(
     return out
 
 
+# ---------- Stock (inventory) ----------
+def stock_scope(current: dict) -> dict:
+    if current["role"] == ROLE_SUPER:
+        return {}
+    return {"branch_id": current.get("branch_id")}
+
+
+@api_router.get("/stock")
+async def list_stock(
+    search: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    current=Depends(get_current_user),
+):
+    q = stock_scope(current)
+    if current["role"] == ROLE_SUPER and branch_id and branch_id != "all":
+        q["branch_id"] = branch_id
+    if search:
+        s = search.strip()
+        q["$or"] = [
+            {"code": {"$regex": s, "$options": "i"}},
+            {"name": {"$regex": s, "$options": "i"}},
+            {"description": {"$regex": s, "$options": "i"}},
+        ]
+    items = await db.stock_items.find(q, {"_id": 0}).sort("code", 1).to_list(2000)
+    return items
+
+
+@api_router.get("/stock/{stock_id}")
+async def get_stock(stock_id: str, current=Depends(get_current_user)):
+    q = {"id": stock_id, **stock_scope(current)}
+    item = await db.stock_items.find_one(q, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    return item
+
+
+@api_router.post("/stock")
+async def create_stock(data: StockCreate, current=Depends(get_current_user)):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    if current["role"] == ROLE_SUPER:
+        if not data.branch_id:
+            raise HTTPException(status_code=400, detail="branch_id is required")
+        branch_id = data.branch_id
+    else:
+        branch_id = current.get("branch_id")
+    if not await db.branches.find_one({"id": branch_id}):
+        raise HTTPException(status_code=400, detail="Branch not found")
+    code = data.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+    if await db.stock_items.find_one({"code": code, "branch_id": branch_id}):
+        raise HTTPException(status_code=400, detail=f"Stock code '{code}' already exists in this branch")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "branch_id": branch_id,
+        "code": code,
+        "name": data.name.strip(),
+        "description": data.description or "",
+        "notes": data.notes or "",
+        "photos": [],
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "created_by": current["id"],
+    }
+    await db.stock_items.insert_one(doc)
+    doc.pop("_id", None)
+    await log_action(current, "create", "stock", doc["id"],
+                     f"Created stock item {code} ({doc['name']})", branch_id=branch_id)
+    return doc
+
+
+@api_router.put("/stock/{stock_id}")
+async def update_stock(stock_id: str, data: StockUpdate, current=Depends(get_current_user)):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    q = {"id": stock_id, **stock_scope(current)}
+    existing = await db.stock_items.find_one(q)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    update = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
+    if "code" in update:
+        update["code"] = update["code"].strip()
+        if not update["code"]:
+            raise HTTPException(status_code=400, detail="Code cannot be empty")
+        dup = await db.stock_items.find_one({
+            "code": update["code"],
+            "branch_id": existing["branch_id"],
+            "id": {"$ne": stock_id},
+        })
+        if dup:
+            raise HTTPException(status_code=400, detail="Stock code already exists in this branch")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.stock_items.find_one_and_update({"id": stock_id}, {"$set": update}, return_document=True)
+    res.pop("_id", None)
+    await log_action(current, "update", "stock", stock_id,
+                     f"Updated stock item {res.get('code')}", branch_id=res.get("branch_id"))
+    return res
+
+
+@api_router.delete("/stock/{stock_id}")
+async def delete_stock(stock_id: str, current=Depends(get_current_user)):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    q = {"id": stock_id, **stock_scope(current)}
+    existing = await db.stock_items.find_one(q)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    await db.stock_items.delete_one({"id": stock_id})
+    # Unlink from any bookings (keep the photo snapshot intact)
+    await db.bookings.update_many(
+        {"stock_id": stock_id}, {"$set": {"stock_id": None}}
+    )
+    await log_action(current, "delete", "stock", stock_id,
+                     f"Deleted stock item {existing.get('code')}",
+                     branch_id=existing.get("branch_id"))
+    return {"ok": True}
+
+
+@api_router.post("/stock/{stock_id}/photos")
+async def upload_stock_photo(
+    stock_id: str,
+    file: UploadFile = File(...),
+    current=Depends(get_current_user),
+):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    q = {"id": stock_id, **stock_scope(current)}
+    stock = await db.stock_items.find_one(q)
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_PHOTO_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, or WebP images are allowed")
+    photos = stock.get("photos") or []
+    if len(photos) >= MAX_PHOTOS_PER_BOOKING:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_PHOTOS_PER_BOOKING} photos per stock item")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 8 MB)")
+    ext = MIME_EXT.get(content_type, "bin")
+    file_id = str(uuid.uuid4())
+    storage_path = f"{APP_NAME}/stock/{stock_id}/{file_id}.{ext}"
+    try:
+        result = await put_object(storage_path, data, content_type)
+    except Exception as e:
+        logging.error("Stock photo upload failed: %s", e)
+        raise HTTPException(status_code=500, detail="Photo upload failed")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    photo_meta = {
+        "id": file_id,
+        "storage_path": result.get("path", storage_path),
+        "content_type": content_type,
+        "original_filename": file.filename or f"{file_id}.{ext}",
+        "size": result.get("size", len(data)),
+        "created_at": now_iso,
+        "is_deleted": False,
+    }
+    await db.files.insert_one({**photo_meta, "stock_id": stock_id})
+    await db.stock_items.update_one(
+        {"id": stock_id},
+        {"$push": {"photos": photo_meta}, "$set": {"updated_at": now_iso}},
+    )
+    await log_action(current, "create", "photo", file_id,
+                     f"Uploaded photo to stock {stock.get('code')}",
+                     branch_id=stock.get("branch_id"))
+    return photo_meta
+
+
+@api_router.delete("/stock/{stock_id}/photos/{photo_id}")
+async def delete_stock_photo(
+    stock_id: str, photo_id: str, current=Depends(get_current_user),
+):
+    require_role(current, {ROLE_SUPER, ROLE_MANAGER})
+    q = {"id": stock_id, **stock_scope(current)}
+    stock = await db.stock_items.find_one(q)
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    await db.stock_items.update_one(
+        {"id": stock_id},
+        {"$pull": {"photos": {"id": photo_id}},
+         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    await db.files.update_one({"id": photo_id}, {"$set": {"is_deleted": True}})
+    await log_action(current, "delete", "photo", photo_id,
+                     f"Removed photo from stock {stock.get('code')}",
+                     branch_id=stock.get("branch_id"))
+    return {"ok": True}
+
+
 # ---------- Photo uploads ----------
 @api_router.post("/bookings/{booking_id}/photos")
 async def upload_booking_photo(
@@ -753,7 +981,26 @@ async def serve_file(
             q["branch_id"] = user.get("branch_id")
         booking = await db.bookings.find_one(q)
         if not booking:
-            raise HTTPException(status_code=403, detail="Forbidden")
+            # allow if the booking's stock_photos snapshot references this file
+            snap_q = {"stock_photos.id": file_id}
+            if user.get("role") != ROLE_SUPER:
+                snap_q["branch_id"] = user.get("branch_id")
+            snap = await db.bookings.find_one(snap_q)
+            if not snap:
+                raise HTTPException(status_code=403, detail="Forbidden")
+    elif record.get("stock_id"):
+        q = {"id": record["stock_id"]}
+        if user.get("role") != ROLE_SUPER:
+            q["branch_id"] = user.get("branch_id")
+        stock = await db.stock_items.find_one(q)
+        if not stock:
+            # allow if any booking in scope holds this file as a stock_photos snapshot
+            snap_q = {"stock_photos.id": file_id}
+            if user.get("role") != ROLE_SUPER:
+                snap_q["branch_id"] = user.get("branch_id")
+            snap = await db.bookings.find_one(snap_q)
+            if not snap:
+                raise HTTPException(status_code=403, detail="Forbidden")
     try:
         data, ctype = await get_object(record["storage_path"])
     except Exception as e:
@@ -908,6 +1155,10 @@ async def on_startup():
     await db.audit_log.create_index("branch_id")
     await db.files.create_index("id", unique=True)
     await db.files.create_index("booking_id")
+    await db.files.create_index("stock_id")
+    await db.stock_items.create_index("id", unique=True)
+    await db.stock_items.create_index("branch_id")
+    await db.stock_items.create_index([("branch_id", 1), ("code", 1)], unique=True)
 
     # Init object storage (best-effort)
     try:
