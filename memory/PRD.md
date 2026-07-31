@@ -46,6 +46,15 @@
 - ✅ **Audit log** — every create/update/delete on branches, users, bookings, and photos is captured to `audit_log` collection with user, entity, summary, branch, timestamp. `/audit` page with search + action + entity + branch filters. Super admin sees everything; managers see own branch only; staff has no access (403).
 - ✅ 22/22 backend tests pass; full frontend flow verified for super_admin + manager.
 
+### Iteration 5 (Jul 2026) — Stock module
+- ✅ **Stock inventory** — new `/stock` page (visible to all roles, branch-scoped). Managers/super admin can add/edit/delete stock items with unique code per branch, name, description, notes, and up to 5 photos each (Emergent object storage). Beautiful card grid with cover photo + code + branch badge.
+- ✅ **Stock code autofill on bookings** — the New/Edit Booking dialog gained a "Load from stock" search: type any code or name → live dropdown with photo thumbnails → click to fill product code, product name, link stock_id, and copy the stock's active photos onto the booking as a snapshot. Unlink button clears the link.
+- ✅ **Bill/Invoice photos** — printed invoice now shows the linked stock's photos in an "Item photos" strip below the item block, so bills carry visual proof of the jewellery.
+- ✅ **Snapshot semantics** — `booking.stock_photos` is intentionally decoupled from live stock: if the stock item is later edited or deleted, existing bookings/invoices retain their original photos.
+- ✅ **Photo delete hardening** — DELETE endpoints for both stock and booking photos now validate the photo belongs to the scoped owner (404 otherwise) and only mark files owned by that entity as deleted.
+- ✅ **Explicit unlink** — PUT /api/bookings accepts `stock_id: null` to clear the link + snapshot while preserving PATCH semantics for other fields.
+- ✅ 4/4 backend + 1/1 frontend retest scenarios pass 100%.
+
 ## Backlog
 ### Iteration 3 (Feb 2026) — P1 features ✅
 - ✅ **Printable branch-aware invoice** at `/invoice/:id` — clean light card with branch name/address/phone, customer + item blocks, amount breakdown incl. rental balance, signature line. Uses browser native print → Save as PDF.
