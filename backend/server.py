@@ -572,7 +572,10 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
     existing = await db.bookings.find_one(q)
     if not existing:
         raise HTTPException(status_code=404, detail="Booking not found")
-    update = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
+    raw = data.model_dump(exclude_unset=True)
+    # `stock_id: null` explicitly unlinks — preserve that intent before dropping other nulls
+    unlink_stock = "stock_id" in raw and raw["stock_id"] is None
+    update = {k: v for k, v in raw.items() if v is not None}
     if "bill_no" in update:
         dup = await db.bookings.find_one({"bill_no": update["bill_no"], "id": {"$ne": booking_id}})
         if dup:
@@ -589,6 +592,9 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
         else:
             update["stock_id"] = None
             update["stock_photos"] = []
+    elif unlink_stock:
+        update["stock_id"] = None
+        update["stock_photos"] = []
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.bookings.find_one_and_update({"id": booking_id}, {"$set": update}, return_document=True)
     res.pop("_id", None)
@@ -868,12 +874,14 @@ async def delete_stock_photo(
     stock = await db.stock_items.find_one(q)
     if not stock:
         raise HTTPException(status_code=404, detail="Stock item not found")
+    if not any(p.get("id") == photo_id for p in (stock.get("photos") or [])):
+        raise HTTPException(status_code=404, detail="Photo not found on this stock item")
     await db.stock_items.update_one(
         {"id": stock_id},
         {"$pull": {"photos": {"id": photo_id}},
          "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
     )
-    await db.files.update_one({"id": photo_id}, {"$set": {"is_deleted": True}})
+    await db.files.update_one({"id": photo_id, "stock_id": stock_id}, {"$set": {"is_deleted": True}})
     await log_action(current, "delete", "photo", photo_id,
                      f"Removed photo from stock {stock.get('code')}",
                      branch_id=stock.get("branch_id"))
@@ -938,12 +946,14 @@ async def delete_booking_photo(
     booking = await db.bookings.find_one(q)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
+    if not any(p.get("id") == photo_id for p in (booking.get("photos") or [])):
+        raise HTTPException(status_code=404, detail="Photo not found on this booking")
     await db.bookings.update_one(
         {"id": booking_id},
         {"$pull": {"photos": {"id": photo_id}},
          "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
     )
-    await db.files.update_one({"id": photo_id}, {"$set": {"is_deleted": True}})
+    await db.files.update_one({"id": photo_id, "booking_id": booking_id}, {"$set": {"is_deleted": True}})
     await log_action(current, "delete", "photo", photo_id,
                      f"Removed photo from {booking.get('bill_no')}",
                      branch_id=booking.get("branch_id"))

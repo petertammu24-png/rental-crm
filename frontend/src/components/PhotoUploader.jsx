@@ -107,7 +107,7 @@ export const PhotoUploader = ({ bookingId, stockId, photos: initialPhotos = [], 
           <button
             type="button"
             onClick={handlePick}
-            disabled={uploading || !bookingId}
+            disabled={uploading || !endpointBase}
             className="aspect-square neu-btn flex flex-col items-center justify-center text-[#B097D1] hover:text-white disabled:opacity-50"
             data-testid="photo-upload-trigger"
           >
