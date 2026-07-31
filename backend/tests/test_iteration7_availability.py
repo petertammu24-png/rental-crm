@@ -226,6 +226,154 @@ def test_concurrent_overlapping_creates_allow_exactly_one_booking(state):
     winning_bill = successes[0].json()["bill_no"]
     assert all(winning_bill in response.json()["detail"] for response in conflicts)
 
+    schedule = state["admin"].get(f"{API}/stock/{stock['id']}/schedule", timeout=TIMEOUT)
+    assert schedule.status_code == 200, schedule.text
+    schedule_data = schedule.json()
+    assert schedule_data["total_bookings"] == 1
+    assert [booking["id"] for booking in schedule_data["bookings"]] == [successes[0].json()["id"]]
+
+
+# Conflict responses must not consume branch auto-bill sequence numbers.
+def test_conflict_storm_does_not_create_bill_number_gap(state):
+    stock = _create_stock(state, "BNG", "BILL_GAP")
+    first_response = _create_booking(
+        state, "BNG", "BILL_BASE", "2027-02-01", "2027-02-05", stock_id=stock["id"]
+    )
+    assert first_response.status_code == 200, first_response.text
+    first_seq = int(first_response.json()["bill_no"].split("-")[-1])
+
+    conflict_payloads = [
+        _booking_payload(
+            state["branches"]["BNG"]["id"],
+            f"BILL_CONFLICT_{index}",
+            "2027-02-02",
+            "2027-02-04",
+            stock_id=stock["id"],
+        )
+        for index in range(8)
+    ]
+    headers = dict(state["admin"].headers)
+
+    def submit(payload: dict) -> requests.Response:
+        return requests.post(f"{API}/bookings", json=payload, headers=headers, timeout=TIMEOUT)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        conflicts = list(pool.map(submit, conflict_payloads))
+    assert all(response.status_code == 409 for response in conflicts), [
+        {"status": response.status_code, "body": response.text[:200]} for response in conflicts
+    ]
+
+    next_response = _create_booking(
+        state, "BNG", "BILL_NEXT", "2027-02-06", "2027-02-08", stock_id=stock["id"]
+    )
+    assert next_response.status_code == 200, next_response.text
+    next_seq = int(next_response.json()["bill_no"].split("-")[-1])
+    assert next_seq == first_seq + 1, (first_response.json()["bill_no"], next_response.json()["bill_no"])
+
+
+# Concurrent activation updates must atomically admit only one overlapping reservation.
+def test_concurrent_status_updates_allow_exactly_one_active_booking(state):
+    stock = _create_stock(state, "BNG", "CONCURRENT_UPDATE")
+    first = _create_booking(
+        state, "BNG", "UPDATE_RACE_A", "2027-03-10", "2027-03-15",
+        stock_id=stock["id"], status="Returned",
+    )
+    second = _create_booking(
+        state, "BNG", "UPDATE_RACE_B", "2027-03-10", "2027-03-15",
+        stock_id=stock["id"], status="Returned",
+    )
+    assert first.status_code == second.status_code == 200
+    booking_ids = [first.json()["id"], second.json()["id"]]
+    headers = dict(state["admin"].headers)
+
+    def activate(booking_id: str) -> requests.Response:
+        return requests.put(
+            f"{API}/bookings/{booking_id}", json={"status": "Booked"},
+            headers=headers, timeout=TIMEOUT,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(activate, booking_ids))
+    assert sorted(response.status_code for response in responses) == [200, 409], [
+        {"status": response.status_code, "body": response.text[:200]} for response in responses
+    ]
+
+    persisted = [
+        state["admin"].get(f"{API}/bookings/{booking_id}", timeout=TIMEOUT).json()
+        for booking_id in booking_ids
+    ]
+    assert sorted(booking["status"] for booking in persisted) == ["Booked", "Returned"]
+    blocked = _create_booking(
+        state, "BNG", "UPDATE_RACE_PROBE", "2027-03-11", "2027-03-12", stock_id=stock["id"]
+    )
+    assert blocked.status_code == 409, blocked.text
+
+
+# Failed stock moves restore the old reservation; status/null updates and deletes release it.
+def test_update_conflict_restore_and_release_paths(state):
+    old_stock = _create_stock(state, "BNG", "UPDATE_OLD")
+    occupied_stock = _create_stock(state, "BNG", "UPDATE_OCCUPIED")
+    mover = _create_booking(
+        state, "BNG", "MOVER", "2027-04-01", "2027-04-05", stock_id=old_stock["id"]
+    )
+    occupied = _create_booking(
+        state, "BNG", "OCCUPIED", "2027-04-01", "2027-04-05", stock_id=occupied_stock["id"]
+    )
+    assert mover.status_code == occupied.status_code == 200
+
+    failed_move = state["admin"].put(
+        f"{API}/bookings/{mover.json()['id']}",
+        json={"stock_id": occupied_stock["id"]}, timeout=TIMEOUT,
+    )
+    assert failed_move.status_code == 409, failed_move.text
+    persisted_mover = state["admin"].get(
+        f"{API}/bookings/{mover.json()['id']}", timeout=TIMEOUT
+    )
+    assert persisted_mover.status_code == 200
+    assert persisted_mover.json()["stock_id"] == old_stock["id"]
+    old_slot_probe = _create_booking(
+        state, "BNG", "RESTORE_PROBE", "2027-04-02", "2027-04-03", stock_id=old_stock["id"]
+    )
+    assert old_slot_probe.status_code == 409, old_slot_probe.text
+
+    returned = state["admin"].put(
+        f"{API}/bookings/{mover.json()['id']}", json={"status": "Returned"}, timeout=TIMEOUT
+    )
+    assert returned.status_code == 200 and returned.json()["status"] == "Returned"
+    after_return = _create_booking(
+        state, "BNG", "AFTER_STATUS_RELEASE", "2027-04-02", "2027-04-03", stock_id=old_stock["id"]
+    )
+    assert after_return.status_code == 200, after_return.text
+
+    unlink_stock = _create_stock(state, "BNG", "UNLINK_RELEASE")
+    unlink_source = _create_booking(
+        state, "BNG", "UNLINK_SOURCE", "2027-05-01", "2027-05-05", stock_id=unlink_stock["id"]
+    )
+    assert unlink_source.status_code == 200
+    unlinked = state["admin"].put(
+        f"{API}/bookings/{unlink_source.json()['id']}", json={"stock_id": None}, timeout=TIMEOUT
+    )
+    assert unlinked.status_code == 200 and unlinked.json()["stock_id"] is None
+    after_unlink = _create_booking(
+        state, "BNG", "AFTER_UNLINK", "2027-05-02", "2027-05-04", stock_id=unlink_stock["id"]
+    )
+    assert after_unlink.status_code == 200, after_unlink.text
+
+    delete_stock = _create_stock(state, "BNG", "DELETE_RELEASE")
+    delete_source = _create_booking(
+        state, "BNG", "DELETE_SOURCE", "2027-06-01", "2027-06-05", stock_id=delete_stock["id"]
+    )
+    assert delete_source.status_code == 200
+    deleted = state["admin"].delete(
+        f"{API}/bookings/{delete_source.json()['id']}", timeout=TIMEOUT
+    )
+    assert deleted.status_code == 200 and deleted.json() == {"ok": True}
+    state["booking_ids"].remove(delete_source.json()["id"])
+    after_delete = _create_booking(
+        state, "BNG", "AFTER_DELETE", "2027-06-02", "2027-06-04", stock_id=delete_stock["id"]
+    )
+    assert after_delete.status_code == 200, after_delete.text
+
 
 # Updates check effective dates only when availability-relevant fields change.
 def test_update_widening_conflicts_but_notes_only_update_persists(state):

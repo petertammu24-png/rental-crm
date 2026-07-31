@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 7 fix retest passed against the public API. The full focused suite passed 12/12. The 8-request identical-range create race was then repeated in two isolated runs; each produced exactly one 200, seven 409s, and schedule total_bookings=1. Conflict storms did not consume bill numbers: the next successful BNG auto bill was exactly previous + 1. Sequential, concurrent update, release, delete, schedule, revenue, prefix, and CRUD regressions passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7_availability.py",
+    "/app/test_reports/pytest/iter8_results.xml",
+    "/app/test_reports/pytest/iter8_concurrency_run1.xml",
+    "/app/test_reports/pytest/iter8_concurrency_run2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py remains 1,443 lines, above the 700-line maintainability threshold; split auth, bookings/reservations, stock, files, and stats into focused routers/services in a separate refactor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7_availability.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 focused scenarios; create concurrency additionally passed 2/2 isolated repeats)",
+    "frontend": "Not tested (request specified backend only)"
+  },
+  "seed_data_creation": "Created TEST_I7_-prefixed stock and booking records for BNG/KLN, including concurrent create/update, bill-gap, release, schedule, revenue, and CRUD cases. Fixture cleanup deleted all tracked test bookings and stock items.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The prior create race and conflict-generated bill gaps are no longer reproducible. Reuse test_iteration7_availability.py. It now verifies schedule count after the race, conflict-storm sequence continuity, concurrent status activation, failed-move reservation restoration, Returned/unlink/delete release paths, and prior regressions.",
+  "rca_of_the_issue": "Verified fix behavior: create_booking atomically pushes a booked_ranges reservation before allocating an auto bill; conflicting requests fail at the reservation step with 409 and therefore never increment the counter. Reservation release/restore logic also preserved availability through tested PUT and DELETE paths."
+}

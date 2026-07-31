@@ -504,6 +504,51 @@ async def check_stock_conflict(
     return conflict
 
 
+async def try_reserve_stock(
+    stock_id: str,
+    booking_id: str,
+    start: str,
+    end: str,
+    exclude_reservation_ids: Optional[list] = None,
+) -> Optional[dict]:
+    """Atomically add a reservation to a stock item if no existing active range overlaps.
+    Returns None on success, or a dict {conflict: {...}} describing the blocker.
+    """
+    if not stock_id or not start or not end:
+        return None
+    overlap_filter = {
+        "$elemMatch": {
+            "start": {"$lte": end},
+            "end": {"$gte": start},
+        }
+    }
+    filter_q = {"id": stock_id, "booked_ranges": {"$not": overlap_filter}}
+    reservation = {
+        "booking_id": booking_id,
+        "start": start,
+        "end": end,
+    }
+    result = await db.stock_items.find_one_and_update(
+        filter_q,
+        {"$push": {"booked_ranges": reservation}},
+        return_document=True,
+    )
+    if result is not None:
+        return None
+    # Reservation failed — surface the conflicting booking for a helpful message
+    conflict = await check_stock_conflict(stock_id, start, end, exclude_booking_id=booking_id)
+    return {"conflict": conflict}
+
+
+async def release_stock_reservation(stock_id: str, booking_id: str):
+    if not stock_id or not booking_id:
+        return
+    await db.stock_items.update_one(
+        {"id": stock_id},
+        {"$pull": {"booked_ranges": {"booking_id": booking_id}}},
+    )
+
+
 @api_router.post("/bookings")
 async def create_booking(data: BookingCreate, current=Depends(get_current_user)):
     if current["role"] == ROLE_SUPER:
@@ -518,48 +563,58 @@ async def create_booking(data: BookingCreate, current=Depends(get_current_user))
     if not branch:
         raise HTTPException(status_code=400, detail="Branch not found")
 
-    bill_no = (data.bill_no or "").strip()
-    if not bill_no:
-        bill_no = await next_bill_no(branch["code"])
-    else:
-        if await db.bookings.find_one({"bill_no": bill_no}):
-            raise HTTPException(status_code=400, detail=f"Bill No '{bill_no}' already exists")
+    # Pre-validate stock (existence + branch) BEFORE allocating a bill number,
+    # so failed attempts don't burn branch sequence numbers.
+    stock = None
+    if data.stock_id:
+        stock = await db.stock_items.find_one({"id": data.stock_id, "branch_id": branch_id}, {"_id": 0})
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-    doc = data.model_dump()
-    doc["bill_no"] = bill_no
-    doc["branch_id"] = branch_id
-    doc["id"] = str(uuid.uuid4())
-    doc["created_at"] = now_iso
-    doc["updated_at"] = now_iso
-    doc["created_by"] = current["id"]
-    # Snapshot stock photos if a stock item is linked
-    if doc.get("stock_id"):
-        stock = await db.stock_items.find_one({"id": doc["stock_id"], "branch_id": branch_id}, {"_id": 0})
-        if stock:
-            # Conflict check: same stock booked overlapping dates
-            if doc.get("status") in ("Booked", "Delivered"):
-                conflict = await check_stock_conflict(
-                    doc["stock_id"], doc["booking_date"], doc["return_date"]
+    booking_uuid = str(uuid.uuid4())
+    reservation_taken = False
+    if stock and data.status in ("Booked", "Delivered"):
+        res_result = await try_reserve_stock(
+            data.stock_id, booking_uuid, data.booking_date, data.return_date
+        )
+        if res_result is not None:
+            conflict = res_result.get("conflict")
+            detail = "This item is already booked for the selected dates."
+            if conflict:
+                detail = (
+                    f"This item is already booked from {conflict['booking_date']} to "
+                    f"{conflict['return_date']} (bill {conflict['bill_no']}). "
+                    f"Please choose different dates or another item."
                 )
-                if conflict:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            f"This item is already booked from {conflict['booking_date']} to "
-                            f"{conflict['return_date']} (bill {conflict['bill_no']}). "
-                            f"Please choose different dates or another item."
-                        ),
-                    )
+            raise HTTPException(status_code=409, detail=detail)
+        reservation_taken = True
+
+    bill_no = (data.bill_no or "").strip()
+    try:
+        if not bill_no:
+            bill_no = await next_bill_no(branch["code"])
+        else:
+            if await db.bookings.find_one({"bill_no": bill_no}):
+                raise HTTPException(status_code=400, detail=f"Bill No '{bill_no}' already exists")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        doc = data.model_dump()
+        doc["bill_no"] = bill_no
+        doc["branch_id"] = branch_id
+        doc["id"] = booking_uuid
+        doc["created_at"] = now_iso
+        doc["updated_at"] = now_iso
+        doc["created_by"] = current["id"]
+        if stock:
             doc["stock_photos"] = [p for p in (stock.get("photos") or []) if not p.get("is_deleted")]
             if not doc.get("product_name"):
                 doc["product_name"] = stock.get("name") or ""
         else:
             doc["stock_id"] = None
             doc["stock_photos"] = []
-    else:
-        doc["stock_photos"] = []
-    await db.bookings.insert_one(doc)
+        await db.bookings.insert_one(doc)
+    except Exception:
+        if reservation_taken:
+            await release_stock_reservation(data.stock_id, booking_uuid)
+        raise
     doc.pop("_id", None)
     await log_action(current, "create", "booking", doc["id"],
                      f"Created booking {bill_no} for {data.customer.name}", branch_id=branch_id)
@@ -630,27 +685,45 @@ async def update_booking(booking_id: str, data: BookingUpdate, current=Depends(g
     elif unlink_stock:
         update["stock_id"] = None
         update["stock_photos"] = []
-    # Overlap check if stock or dates changed
+    # Overlap check if stock or dates changed — atomic reservation via stock doc
     effective_stock = update.get("stock_id", existing.get("stock_id"))
     effective_start = update.get("booking_date", existing.get("booking_date"))
     effective_end = update.get("return_date", existing.get("return_date"))
     effective_status = update.get("status", existing.get("status"))
-    if (
-        effective_stock
-        and effective_status in ("Booked", "Delivered")
-        and any(k in update for k in ("stock_id", "booking_date", "return_date", "status"))
-    ):
-        conflict = await check_stock_conflict(
-            effective_stock, effective_start, effective_end, exclude_booking_id=booking_id
+
+    prev_stock = existing.get("stock_id")
+    prev_status = existing.get("status")
+    prev_active = bool(prev_stock) and prev_status in ("Booked", "Delivered")
+    new_active = bool(effective_stock) and effective_status in ("Booked", "Delivered")
+
+    needs_new_reservation = new_active and any(
+        k in update for k in ("stock_id", "booking_date", "return_date", "status")
+    )
+    if new_active and needs_new_reservation:
+        # Release any old reservation first so overlap check considers freed dates
+        if prev_active and prev_stock:
+            await release_stock_reservation(prev_stock, booking_id)
+        res_result = await try_reserve_stock(
+            effective_stock, booking_id, effective_start, effective_end
         )
-        if conflict:
-            raise HTTPException(
-                status_code=409,
-                detail=(
+        if res_result is not None:
+            # Restore prior reservation if we had one
+            if prev_active and prev_stock:
+                await try_reserve_stock(
+                    prev_stock, booking_id,
+                    existing.get("booking_date"), existing.get("return_date"),
+                )
+            conflict = res_result.get("conflict")
+            detail = "This item is already booked for the selected dates."
+            if conflict:
+                detail = (
                     f"This item is already booked from {conflict['booking_date']} to "
                     f"{conflict['return_date']} (bill {conflict['bill_no']})."
-                ),
-            )
+                )
+            raise HTTPException(status_code=409, detail=detail)
+    elif prev_active and not new_active:
+        # Booking became inactive (Returned, stock unlinked, etc.) — free the slot
+        await release_stock_reservation(prev_stock, booking_id)
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.bookings.find_one_and_update({"id": booking_id}, {"$set": update}, return_document=True)
     res.pop("_id", None)
@@ -669,6 +742,8 @@ async def delete_booking(booking_id: str, current=Depends(get_current_user)):
     if not existing:
         raise HTTPException(status_code=404, detail="Booking not found")
     await db.bookings.delete_one(q)
+    if existing.get("stock_id"):
+        await release_stock_reservation(existing["stock_id"], booking_id)
     await log_action(current, "delete", "booking", booking_id,
                      f"Deleted booking {existing.get('bill_no')}",
                      branch_id=existing.get("branch_id"))
@@ -1292,6 +1367,21 @@ async def on_startup():
     await db.stock_items.create_index("id", unique=True)
     await db.stock_items.create_index("branch_id")
     await db.stock_items.create_index([("branch_id", 1), ("code", 1)], unique=True)
+
+    # One-time backfill: ensure stock_items.booked_ranges reflects currently active bookings
+    # so the atomic reservation guard works from day one.
+    async for stock in db.stock_items.find({"booked_ranges": {"$exists": False}}, {"_id": 0, "id": 1}):
+        active = await db.bookings.find(
+            {"stock_id": stock["id"], "status": {"$in": ["Booked", "Delivered"]}},
+            {"_id": 0, "id": 1, "booking_date": 1, "return_date": 1},
+        ).to_list(1000)
+        ranges = [
+            {"booking_id": b["id"], "start": b.get("booking_date"), "end": b.get("return_date")}
+            for b in active
+        ]
+        await db.stock_items.update_one(
+            {"id": stock["id"]}, {"$set": {"booked_ranges": ranges}}
+        )
 
     # Init object storage (best-effort)
     try:
